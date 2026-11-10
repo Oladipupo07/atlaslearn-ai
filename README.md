@@ -1,73 +1,91 @@
-# 🎯 AtlasLearn AI
+# AtlasLearn AI — Offline-First Personal Finance OS
 
-AtlasLearn AI is a premium, gamified personal finance education platform and utility suite tailored specifically for students. It leverages Google Gemini AI and real-time data to help students budget smarter, learn investing fundamentals, identify phishing scams, and track their daily financial learning progress.
-
----
-
-## 🚀 Key Features
-
-*   **🤖 AI Finance Tutor**
-    An interactive chatbot powered by Google Gemini that breaks down complex financial terms, investing principles, taxes, and money management concepts into easy-to-understand student-friendly explanations. Includes pre-filled prompt suggestions for quick learning.
-*   **💼 Smart Budget Planner**
-    An intuitive, real-time budget tracking dashboard. Users can set their weekly/monthly income, define target savings goals, add individual expenses with categorized emojis (e.g., Food 🍔, Utilities ⚡), and view automatic breakdowns.
-*   **🛡️ Phishing & Scam Detector**
-    An AI-powered scanning utility. Students can paste any suspicious SMS, DM, email, or chat message to analyze pattern risks (Low, Medium, High) with linguistic red-flag keywords, confidence metrics, and safety tips.
-*   **🏆 Gamified Quizzes & Daily Streaks**
-    Tracks and rewards daily learning activity. Integrated streak systems show daily active streaks with visual fire/flame counters on the dashboard and navigation panel, encouraging consistent financial habit-building.
+AtlasLearn AI is an institutional-grade, offline-first financial literacy and cash-flow management platform built for students and young professionals. It combines **Google Gemini 2.5 Flash** cloud intelligence with a deterministic **Client-Side Offline Engine** so every core workflow—budgeting, 30-day roadmaps, 5-pillar financial audits, scam detection, timed IQ quizzes, and context-aware AI coaching—works seamlessly both online and with zero internet connectivity.
 
 ---
 
-## 🛠️ Technology Stack
+## Core Architecture & Capabilities
 
-*   **Frontend Framework**: [Next.js 16 (App Router)](https://nextjs.org/)
-*   **Styling**: [Tailwind CSS v4](https://tailwindcss.com/) with PostCSS & CSS custom properties
-*   **Database & Auth**: [Firebase (Cloud Firestore & Authentication)](https://firebase.google.com/)
-*   **Animations**: [Framer Motion](https://www.framer.com/motion/) for smooth glassmorphism micro-animations
-*   **Visualizations**: [Recharts](https://recharts.org/) for interactive financial breakdown area & pie charts
-*   **AI Engine**: [Google Gemini API](https://ai.google.dev/) via `@google/genai`
+* **Financial Command Center (`/dashboard`)**
+  Real-time telemetry across Inflow, Logged Outflow, Net Liquidity, and Health Index grading (`A+` to `C`), complete with cash-flow area charts, top expense category distributions, and daily XP objectives.
+* **Precision Budget & Expense Ledger (`/budget`)**
+  Daily and historical budget tracking with automatic balance carry-forward, savings velocity progress bars, and instant dual-persistence (`localStorage` + Cloud Firestore).
+* **Context-Aware Atlas AI Advisor (`/chatbot` & Floating Coach)**
+  Reads your live income, expense utilization, active streak, level, roadmap completion, and latest report card score to provide personalized 50/30/20 allocation advice—powered by Gemini 2.5 Flash online and the local coaching engine offline.
+* **30-Day Execution Roadmaps (`/roadmap`)**
+  Generates tailored 4-week action plans across 7 financial goals (*Budgeting*, *Emergency Savings*, *Investing*, *Scam Defense*, etc.) with interactive weekly task checklists.
+* **5-Pillar Financial Health Report Card (`/report`)**
+  Grades financial fitness from `0–100` across *Budgeting*, *Savings*, *Learning*, *Scam Spotting*, and *Consistency* with an interactive radar chart, strengths/weaknesses diagnostics, and printable/downloadable `.txt` exports.
+* **Phishing & Scam Shield (`/scam-checker`)**
+  Detects urgency triggers, BVN/NIN/OTP phishing, WhatsApp/Telegram Ponzi schemes, and advance-fee fraud with confidence scoring and persistent local scan history.
+* **Timed Financial IQ Quizzes & Gamification (`/quiz` & `/profile`)**
+  25-second timed questions, 6 scholar levels (*Money Starter* to *Atlas Master*), daily streak tracking, and 7 unlockable achievement badges.
 
 ---
 
-## 📂 Project Structure
+## Offline-First Engineering
+
+| Module | Offline Mechanism | Reconnection Behavior |
+| :--- | :--- | :--- |
+| **Authentication & Access** | Instant **Local Vault / Guest Mode** + automatic offline entry | Preserves local ledger & upgrades cleanly on sign-in |
+| **Firestore Database** | `persistentLocalCache` + `persistentMultipleTabManager` (IndexedDB) | Automatic background reconciliation on `online` event |
+| **Budget & Expense Ledger** | Immediate write-through to date-keyed & summary `localStorage` | Syncs daily documents and expense subcollections |
+| **AI Coach, Roadmaps & Reports** | Client-side heuristic & template engine (`lib/offline-engine.ts`) | Automatically switches to live Gemini 2.5 Flash when online |
+| **PWA Shell** | `@ducanh2912/next-pwa` with front-end navigation caching | Caches visited routes and static assets |
+
+---
+
+## Technology Stack
+
+* **Framework**: [Next.js 16 (App Router)](https://nextjs.org/) + React 19 + TypeScript
+* **Styling**: [Tailwind CSS v4](https://tailwindcss.com/) with custom surface tokens (`.surface-card`, `.bg-grid-pattern`, `.tabular-nums`)
+* **Persistence & Auth**: [Firebase v12](https://firebase.google.com/) (Authentication & Offline-Persistent Cloud Firestore) + LocalStorage Vault
+* **AI Engine**: [Google Gemini API (`@google/genai`)](https://ai.google.dev/) + Local Offline Fallback Engine (`lib/offline-engine.ts`)
+* **Data Visualization & Motion**: [Recharts](https://recharts.org/), [Framer Motion](https://www.framer.com/motion/), and `canvas-confetti`
+
+---
+
+## Project Structure
 
 ```text
 ├── app/
-│   ├── (auth)/             # Authentication routes (Login, Signup)
-│   ├── (dashboard)/        # User workspace routes
-│   │   ├── budget/         # Smart Budget Planner
-│   │   ├── chatbot/        # AI Finance Tutor page (Mobile Responsive)
-│   │   ├── dashboard/      # Overview & Analytics Dashboard
-│   │   ├── quiz/           # Gamified financial literacy quizzes
-│   │   └── scam-checker/   # Phishing & Scam Detector
-│   ├── api/                # Next.js Serverless API endpoints (Gemini AI route)
-│   ├── globals.css         # Tailwind v4 globals and variables
-│   └── layout.tsx          # Root template, theme toggles, and global providers
-├── components/             # Reusable UI widgets and navigation layouts
-├── contexts/               # React Context Providers (AuthContext, StreakContext)
-├── lib/                    # Firebase/Gemini initialization clients & helpers
-└── public/                 # PWA manifests, icons, and static assets
+│   ├── (auth)/             # Authentication & Offline Guest Mode entry (login, signup)
+│   ├── (dashboard)/        # Protected & Local-Vault workspace routes
+│   │   ├── budget/         # Daily & historical Budget Ledger
+│   │   ├── chatbot/        # Context-aware Atlas AI Coach
+│   │   ├── dashboard/      # Executive Financial Command Center
+│   │   ├── profile/        # Scholar level progression, streaks & 7 badges
+│   │   ├── quiz/           # Timed Financial IQ Quiz engine
+│   │   ├── report/         # 5-Pillar Financial Health Report Card & Radar chart
+│   │   ├── roadmap/        # 30-Day personalized execution roadmaps
+│   │   └── scam-checker/   # Phishing & Fraud Shield with offline scan history
+│   ├── api/                # Next.js Route Handlers (coach, chat, quiz, report, roadmap, scam-check)
+│   ├── globals.css         # Design tokens, surface utilities & grid patterns
+│   └── layout.tsx          # Root layout, PWA metadata & global providers
+├── components/             # Categorized Sidebar, MobileNav, GlobalChatbot & UI primitives
+├── contexts/               # AuthContext, GamificationContext & StreakContext
+├── lib/
+│   ├── firebase.ts         # Firebase initialization with IndexedDB persistentLocalCache
+│   ├── offline-engine.ts   # Client-side quiz bank, roadmap generator, report grader & AI coach
+│   └── utils.ts            # Class merging utilities
+└── public/                 # PWA manifest.json and scalable vector icons
 ```
 
 ---
 
-## 💻 Getting Started
+## Getting Started
 
-### 1. Prerequisites
-Ensure you have [Node.js](https://nodejs.org/) installed (v18+ recommended).
-
-### 2. Install Dependencies
-Clone the repository and run:
+### 1. Install Dependencies
 ```bash
 npm install
 ```
 
-### 3. Setup Environment Variables
-Create a `.env.local` file in the root directory and configure the following variables:
+### 2. Configure Environment Variables (Optional for Offline Mode)
+Create a `.env.local` file in the root directory. *(Note: The app works out-of-the-box in Offline / Guest Mode even without API keys configured.)*
+
 ```env
-# Gemini API Key
 GEMINI_API_KEY=your_gemini_api_key_here
 
-# Firebase Configuration
 NEXT_PUBLIC_FIREBASE_API_KEY=your_firebase_api_key
 NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=your_firebase_auth_domain
 NEXT_PUBLIC_FIREBASE_PROJECT_ID=your_firebase_project_id
@@ -76,17 +94,8 @@ NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=your_firebase_messaging_sender_id
 NEXT_PUBLIC_FIREBASE_APP_ID=your_firebase_app_id
 ```
 
-### 4. Run the Development Server
+### 3. Run the Development Server
 ```bash
 npm run dev
 ```
-
-Open [http://localhost:3000](http://localhost:3000) in your browser to view the application.
-
----
-
-## 📱 Mobile Responsiveness & Design
-
-*   **PWA Ready**: Configured with full support for Progress Web Application (PWA) installs, including custom icons, viewport settings, and manifest schemas.
-*   **Edge-to-Edge Chat**: The AI Tutor page has custom negative-margin classes and dynamic viewport height calculations (`100dvh`) to guarantee an immersive, mobile-native chat experience without nested double-scrollbars.
-*   **Adaptive Theme**: Supports auto-detected Dark/Light modes powered by `next-themes` and full glassmorphic styling overlays.
+Open [http://localhost:3000](http://localhost:3000) in your browser.

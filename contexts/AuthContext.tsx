@@ -16,10 +16,10 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
-  isGuest: false,
-  guestName: "Atlas Learner",
+  isGuest: true,
+  guestName: "Atlas Scholar",
   isOnline: true,
-  loading: true,
+  loading: false,
   continueAsGuest: () => {},
   logout: async () => {},
 });
@@ -28,20 +28,16 @@ export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [isGuest, setIsGuest] = useState(false);
-  const [guestName, setGuestName] = useState("Atlas Learner");
+  const [isGuest, setIsGuest] = useState(true);
+  const [guestName, setGuestName] = useState("Atlas Scholar");
   const [isOnline, setIsOnline] = useState(true);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (typeof window !== "undefined") {
       setIsOnline(navigator.onLine);
-      const savedGuest = localStorage.getItem("atlaslearn_guest_mode") === "true";
-      const savedName = localStorage.getItem("atlaslearn_guest_name") || "Atlas Learner";
-      if (savedGuest) {
-        setIsGuest(true);
-        setGuestName(savedName);
-      }
+      const savedName = localStorage.getItem("atlaslearn_guest_name") || "Atlas Scholar";
+      setGuestName(savedName);
     }
 
     const handleOnline = () => setIsOnline(true);
@@ -56,30 +52,27 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         setUser(currentUser);
         if (currentUser) {
           setIsGuest(false);
+        } else {
+          // Always allow local offline vault access when not signed into Firebase
+          setIsGuest(true);
         }
         setLoading(false);
       },
       () => {
-        // If Firebase auth observer errors while offline, fall back cleanly
+        setIsGuest(true);
         setLoading(false);
       }
     );
 
-    // Ensure loading resolves quickly even if Firebase Auth hangs when offline
-    const fallbackTimer = setTimeout(() => {
-      setLoading(false);
-    }, 1500);
-
     return () => {
       window.removeEventListener("online", handleOnline);
       window.removeEventListener("offline", handleOffline);
-      clearTimeout(fallbackTimer);
       unsubscribe();
     };
   }, []);
 
   const continueAsGuest = (name?: string) => {
-    const finalName = name?.trim() || "Atlas Learner";
+    const finalName = name?.trim() || "Atlas Scholar";
     localStorage.setItem("atlaslearn_guest_mode", "true");
     localStorage.setItem("atlaslearn_guest_name", finalName);
     setGuestName(finalName);
@@ -90,10 +83,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const logout = async () => {
     try {
       localStorage.removeItem("atlaslearn_guest_mode");
-      setIsGuest(false);
       if (user) {
         await signOut(auth);
       }
+      setUser(null);
+      setIsGuest(true);
     } catch (error) {
       console.error("Failed to log out", error);
     }

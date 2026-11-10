@@ -1,11 +1,12 @@
 {
   "name": "AtlasLearn AI",
   "short_name": "AtlasLearn",
-  "description": "AI-powered financial literacy platform for students",
-  "start_url": "/",
+  "description": "Offline-first AI personal finance platform for students and young professionals",
+  "start_url": "/dashboard",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#0f172a",
-  "theme_color": "#6366f1",
+  "background_color": "#070b12",
+  "theme_color": "#10b981",
   "orientation": "portrait-primary",
   "icons": [
     {

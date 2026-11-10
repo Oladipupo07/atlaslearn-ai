@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import { usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStreak } from "@/contexts/StreakContext";
 import { useGamification } from "@/contexts/GamificationContext";
 import { Sidebar, MobileNav } from "@/components/navigation";
 import {
-  Loader2,
   WifiOff,
   Flame,
   Sparkles,
@@ -57,38 +55,10 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  const { user, isGuest, isOnline, loading, continueAsGuest } = useAuth();
+  const { user, isGuest, isOnline } = useAuth();
   const { streak } = useStreak();
   const { progress } = useGamification();
-  const router = useRouter();
   const pathname = usePathname();
-
-  useEffect(() => {
-    if (!loading && !user && !isGuest) {
-      if (typeof navigator !== "undefined" && !navigator.onLine) {
-        continueAsGuest();
-      } else {
-        router.push("/login");
-      }
-    }
-  }, [user, isGuest, loading, router, continueAsGuest]);
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-primary/15 border border-primary/25 flex items-center justify-center">
-            <Loader2 className="w-5 h-5 text-primary animate-spin" />
-          </div>
-          <p className="text-muted-foreground text-xs font-medium tracking-wide uppercase">
-            Initializing Workspace…
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-  if (!user && !isGuest) return null;
 
   const currentMeta = PAGE_TITLES[pathname] || {
     title: "AtlasLearn Workspace",

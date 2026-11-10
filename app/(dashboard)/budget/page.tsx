@@ -413,9 +413,9 @@ export default function BudgetPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {!user && (
-            <div className="flex items-center gap-2 text-xs text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-xl px-3 py-2">
+            <div className="flex items-center gap-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-xl px-3 py-2">
               <CloudOff className="w-3.5 h-3.5" />
-              <span>Sign in to sync across devices</span>
+              <span>Local Vault Active (Offline Ready)</span>
             </div>
           )}
           <button

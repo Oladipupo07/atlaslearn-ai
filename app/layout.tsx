@@ -8,6 +8,7 @@ import { StreakProvider } from "@/contexts/StreakContext";
 import { GamificationProvider } from "@/contexts/GamificationContext";
 import GlobalChatbot from "@/components/GlobalChatbot";
 import { PWAInstallPrompt } from "@/components/PWAInstallPrompt";
+import { OfflineServiceWorker } from "@/components/OfflineServiceWorker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -57,6 +58,7 @@ export default function RootLayout({
           <AuthProvider>
             <StreakProvider>
               <GamificationProvider>
+                <OfflineServiceWorker />
                 {children}
                 <FloatingThemeToggle />
                 <GlobalChatbot />
