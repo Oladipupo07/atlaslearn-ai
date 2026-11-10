@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useStreak } from "@/contexts/StreakContext";
 import { doc, getDoc, collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { firestore } from "@/lib/firebase";
+import { generateOfflineCoachReply } from "@/lib/offline-engine";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 
@@ -111,96 +112,142 @@ export default function ChatbotPage() {
 
   useEffect(() => {
     setMounted(true);
+    try {
+      const savedChat = localStorage.getItem("atlaslearn_chat_history");
+      if (savedChat) {
+        const parsed = JSON.parse(savedChat) as { id: string; role: "user" | "assistant"; content: string; timestamp: string }[];
+        if (parsed.length > 0) {
+          setMessages(parsed.map((m) => ({ ...m, timestamp: new Date(m.timestamp || Date.now()) })));
+        }
+      }
+      const params = new URLSearchParams(window.location.search);
+      const q = params.get("q");
+      if (q) {
+        setInput(q);
+      }
+    } catch {}
   }, []);
+
+  // Save chat history locally
+  useEffect(() => {
+    if (!mounted) return;
+    try {
+      localStorage.setItem("atlaslearn_chat_history", JSON.stringify(messages.slice(-30)));
+    } catch {}
+  }, [messages, mounted]);
 
   // Fetch real-time budget, roadmap and report card info for coaching context
   useEffect(() => {
     if (!mounted) return;
 
-    if (user) {
+    // Always load local stats first
+    const si = localStorage.getItem("atlaslearn_income");
+    const sg = localStorage.getItem("atlaslearn_goal");
+    const se = localStorage.getItem("atlaslearn_expenses");
+    const rm = localStorage.getItem("atlaslearn_roadmap");
+    const rh = localStorage.getItem("atlaslearn_report_history");
+
+    if (si) setIncome(Number(si));
+    if (sg) setSavingsGoal(Number(sg));
+    if (se) {
+      try {
+        const parsedExpenses = JSON.parse(se) as { amount: number }[];
+        setTotalExpenses(parsedExpenses.reduce((sum, e) => sum + e.amount, 0));
+      } catch {}
+    }
+    if (rm) {
+      try {
+        const data = JSON.parse(rm);
+        let tot = 0,
+          done = 0;
+        data.weeks?.forEach((w: any) => {
+          w.tasks?.forEach((t: any) => {
+            tot += 1;
+            if (t.completed) done += 1;
+          });
+        });
+        setRoadmapProgress(tot > 0 ? Math.round((done / tot) * 100) : 0);
+      } catch {}
+    }
+    if (rh) {
+      try {
+        const data = JSON.parse(rh);
+        if (data.length > 0) {
+          setLatestReportScore(data[data.length - 1].score);
+        }
+      } catch {}
+    }
+
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
       // 1. Budget Stats
       const budgetRef = doc(firestore, "budgets", user.uid);
       const expensesRef = collection(firestore, "budgets", user.uid, "expenses");
-      const unsubBudget = onSnapshot(budgetRef, (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          setIncome(data.income ?? 0);
-          setSavingsGoal(data.savingsGoal ?? 100000);
-        }
-      });
-      const unsubExpenses = onSnapshot(expensesRef, (snap) => {
-        const total = snap.docs.reduce((sum, d) => sum + (d.data().amount || 0), 0);
-        setTotalExpenses(total);
-      });
+      const unsubBudget = onSnapshot(
+        budgetRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            if (data.income !== undefined) setIncome(data.income);
+            if (data.savingsGoal !== undefined) setSavingsGoal(data.savingsGoal);
+          }
+        },
+        () => {}
+      );
+      const unsubExpenses = onSnapshot(
+        expensesRef,
+        (snap) => {
+          if (!snap.empty) {
+            const total = snap.docs.reduce((sum, d) => sum + (d.data().amount || 0), 0);
+            setTotalExpenses(total);
+          }
+        },
+        () => {}
+      );
 
       // 2. Roadmap progress
       const roadmapRef = doc(firestore, "roadmaps", user.uid);
-      const unsubRoadmap = onSnapshot(roadmapRef, (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          let tot = 0;
-          let done = 0;
-          if (data.weeks) {
-            data.weeks.forEach((w: any) => {
-              w.tasks.forEach((t: any) => {
-                tot += 1;
-                if (t.completed) done += 1;
+      const unsubRoadmap = onSnapshot(
+        roadmapRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            let tot = 0;
+            let done = 0;
+            if (data.weeks) {
+              data.weeks.forEach((w: any) => {
+                w.tasks.forEach((t: any) => {
+                  tot += 1;
+                  if (t.completed) done += 1;
+                });
               });
-            });
+            }
+            setRoadmapProgress(tot > 0 ? Math.round((done / tot) * 100) : 0);
           }
-          setRoadmapProgress(tot > 0 ? Math.round((done / tot) * 100) : 0);
-        }
-      });
+        },
+        () => {}
+      );
 
       // 3. Reports
       const reportRef = doc(firestore, "reports", user.uid);
-      const unsubReport = onSnapshot(reportRef, (snap) => {
-        if (snap.exists()) {
-          const reports = snap.data().history || [];
-          if (reports.length > 0) {
-            setLatestReportScore(reports[reports.length - 1].score);
+      const unsubReport = onSnapshot(
+        reportRef,
+        (snap) => {
+          if (snap.exists()) {
+            const reports = snap.data().history || [];
+            if (reports.length > 0) {
+              setLatestReportScore(reports[reports.length - 1].score);
+            }
           }
-        }
-      });
+        },
+        () => {}
+      );
 
-      return () => { unsubBudget(); unsubExpenses(); unsubRoadmap(); unsubReport(); };
-    } else {
-      // LocalStorage fallbacks
-      const si = localStorage.getItem("atlaslearn_income");
-      const sg = localStorage.getItem("atlaslearn_goal");
-      const se = localStorage.getItem("atlaslearn_expenses");
-      const rm = localStorage.getItem("atlaslearn_roadmap");
-      const rh = localStorage.getItem("atlaslearn_report_history");
-
-      if (si) setIncome(Number(si));
-      if (sg) setSavingsGoal(Number(sg));
-      if (se) {
-        try {
-          const parsedExpenses = JSON.parse(se) as { amount: number }[];
-          setTotalExpenses(parsedExpenses.reduce((sum, e) => sum + e.amount, 0));
-        } catch {}
-      }
-      if (rm) {
-        try {
-          const data = JSON.parse(rm);
-          let tot = 0, done = 0;
-          data.weeks?.forEach((w: any) => {
-            w.tasks?.forEach((t: any) => {
-              tot += 1;
-              if (t.completed) done += 1;
-            });
-          });
-          setRoadmapProgress(tot > 0 ? Math.round((done / tot) * 100) : 0);
-        } catch {}
-      }
-      if (rh) {
-        try {
-          const data = JSON.parse(rh);
-          if (data.length > 0) {
-            setLatestReportScore(data[data.length - 1].score);
-          }
-        } catch {}
-      }
+      return () => {
+        unsubBudget();
+        unsubExpenses();
+        unsubRoadmap();
+        unsubReport();
+      };
     }
   }, [user, mounted]);
 
@@ -215,52 +262,70 @@ export default function ChatbotPage() {
       id: Math.random().toString(),
       role: "user",
       content: text,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
 
-    setMessages(prev => [...prev, userMessage]);
+    const nextMessages = [...messages, userMessage];
+    setMessages(nextMessages);
     setInput("");
     setIsTyping(true);
 
-    try {
-      const response = await fetch("/api/coach", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: messages.concat(userMessage).map(m => ({ role: m.role, content: m.content })),
-          userData: {
-            income,
-            totalExpenses,
-            savingsGoal,
-            streak: streak?.currentStreak ?? 0,
-            level: progress.level,
-            xp: progress.xp,
-            roadmapProgress,
-            latestReportScore
-          }
-        }),
-      });
+    const userDataPayload = {
+      income,
+      totalExpenses,
+      savingsGoal,
+      streak: streak?.currentStreak ?? 0,
+      level: progress.level,
+      xp: progress.xp,
+      roadmapProgress,
+      latestReportScore,
+    };
 
-      const data = await response.json();
+    try {
+      let replyText = "";
+
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        await new Promise((r) => setTimeout(r, 400));
+        replyText = generateOfflineCoachReply(
+          nextMessages.map((m) => ({ role: m.role, content: m.content })),
+          userDataPayload
+        );
+      } else {
+        try {
+          const response = await fetch("/api/coach", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
+              userData: userDataPayload,
+            }),
+          });
+          if (response.ok) {
+            const data = await response.json();
+            replyText = data.message || "";
+          }
+        } catch {
+          replyText = "";
+        }
+
+        if (!replyText) {
+          replyText = generateOfflineCoachReply(
+            nextMessages.map((m) => ({ role: m.role, content: m.content })),
+            userDataPayload
+          );
+        }
+      }
 
       const aiMessage: Message = {
         id: Math.random().toString(),
         role: "assistant",
-        content: data.message || "I couldn't process that right now.",
-        timestamp: new Date()
+        content: replyText,
+        timestamp: new Date(),
       };
 
-      setMessages(prev => [...prev, aiMessage]);
+      setMessages((prev) => [...prev, aiMessage]);
       incrementAICount();
       triggerAction("ai");
-    } catch (error) {
-      const errorMessage: Message = {
-        id: Math.random().toString(),
-        role: "assistant",
-        content: "Oops! I'm having trouble connecting to Atlas Coach right now.",
-        timestamp: new Date()
-      };
-      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsTyping(false);
     }

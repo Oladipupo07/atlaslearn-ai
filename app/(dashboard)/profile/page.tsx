@@ -57,10 +57,13 @@ const itemVariants = {
 };
 
 export default function ProfilePage() {
-  const { user } = useAuth();
+  const { user, isGuest, guestName } = useAuth();
   const { progress, streak, badges, challenge, loading } = useGamification();
   const [mounted, setMounted] = useState(false);
   const [activeTab, setActiveTab] = useState<"journey" | "badges">("journey");
+
+  const profileName = user?.displayName || (isGuest ? guestName : "Atlas Learner");
+  const profileEmail = user?.email ?? (isGuest ? "Offline / Local Profile" : "Not signed in");
 
   useEffect(() => setMounted(true), []);
 
@@ -129,7 +132,7 @@ export default function ProfilePage() {
                 />
               ) : (
                 <div className="w-20 h-20 rounded-2xl border-4 border-card shadow-xl bg-gradient-to-br from-primary to-indigo-600 flex items-center justify-center text-white text-3xl font-black select-none">
-                  {(user?.displayName || user?.email || "A")[0].toUpperCase()}
+                  {(profileName || "A")[0].toUpperCase()}
                 </div>
               )}
               {/* Level badge on avatar */}
@@ -158,11 +161,11 @@ export default function ProfilePage() {
           {/* Name & Email */}
           <div className="mt-4">
             <h1 className="text-2xl font-black tracking-tight text-foreground">
-              {user?.displayName || "Atlas Learner"}
+              {profileName}
             </h1>
             <p className="text-sm text-muted-foreground flex items-center gap-1.5 mt-0.5">
               <Mail className="w-3.5 h-3.5" />
-              {user?.email ?? "Not signed in"}
+              {profileEmail}
             </p>
             <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-1 opacity-70">
               <Calendar className="w-3 h-3" />

@@ -6,6 +6,7 @@ import { Trophy, Clock, Target, RotateCcw, AlertTriangle, ShieldCheck, ChevronRi
 import { cn } from "@/lib/utils";
 import confetti from "canvas-confetti";
 import { useGamification } from "@/contexts/GamificationContext";
+import { getOfflineQuizQuestions } from "@/lib/offline-engine";
 
 type Question = {
   id: number;
@@ -48,10 +49,25 @@ export default function QuizPage() {
     setTimerActive(false);
 
     try {
-      const res = await fetch("/api/quiz");
-      const data = await res.json();
-      setQuestions(data.questions || []);
-      
+      let loadedQuestions: Question[] = [];
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        loadedQuestions = getOfflineQuizQuestions(10);
+      } else {
+        try {
+          const res = await fetch("/api/quiz");
+          if (res.ok) {
+            const data = await res.json();
+            loadedQuestions = data.questions || [];
+          }
+        } catch {
+          loadedQuestions = [];
+        }
+        if (loadedQuestions.length === 0) {
+          loadedQuestions = getOfflineQuizQuestions(10);
+        }
+      }
+
+      setQuestions(loadedQuestions);
       setCurrentIdx(0);
       setScore(0);
       setIsQuizOver(false);
@@ -59,9 +75,6 @@ export default function QuizPage() {
       setIsAnswered(false);
       setTimeLeft(25);
       setTimerActive(true);
-    } catch (e) {
-      console.error(e);
-      alert("Failed to generate quiz. Please try again.");
     } finally {
       setIsGenerating(false);
     }
@@ -93,6 +106,16 @@ export default function QuizPage() {
       setIsQuizOver(true);
       setTimerActive(false);
       triggerConfetti();
+      try {
+        const raw = localStorage.getItem("atlaslearn_quiz_history");
+        const history = raw ? JSON.parse(raw) : [];
+        history.push({
+          score,
+          total: questions.length,
+          date: new Date().toISOString(),
+        });
+        localStorage.setItem("atlaslearn_quiz_history", JSON.stringify(history));
+      } catch {}
       addXP(10, "Quiz Completed");
       triggerAction("quiz");
       if (score / questions.length >= 0.8) {

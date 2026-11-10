@@ -9,6 +9,7 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import { firestore } from "@/lib/firebase";
+import { generateOfflineRoadmap } from "@/lib/offline-engine";
 import confetti from "canvas-confetti";
 
 type Task = {
@@ -69,16 +70,18 @@ export default function RoadmapPage() {
     const loadRoadmap = async () => {
       setLoading(true);
       try {
-        if (user) {
+        const local = localStorage.getItem("atlaslearn_roadmap");
+        if (local) {
+          setRoadmap(JSON.parse(local));
+        }
+
+        if (user && typeof navigator !== "undefined" && navigator.onLine) {
           const docRef = doc(firestore, "roadmaps", user.uid);
           const docSnap = await getDoc(docRef);
           if (docSnap.exists()) {
-            setRoadmap(docSnap.data() as Roadmap);
-          }
-        } else {
-          const local = localStorage.getItem("atlaslearn_roadmap");
-          if (local) {
-            setRoadmap(JSON.parse(local));
+            const remoteData = docSnap.data() as Roadmap;
+            setRoadmap(remoteData);
+            localStorage.setItem("atlaslearn_roadmap", JSON.stringify(remoteData));
           }
         }
       } catch (err) {
@@ -96,49 +99,61 @@ export default function RoadmapPage() {
     e.preventDefault();
     setLoading(true);
 
+    const inputs = {
+      age,
+      isStudent,
+      monthlyIncome: Number(monthlyIncome),
+      monthlyExpenses: Number(monthlyExpenses),
+      savingsGoal: Number(savingsGoal),
+      financialGoal,
+    };
+
     try {
-      const res = await fetch("/api/roadmap", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          age,
-          isStudent,
-          monthlyIncome: Number(monthlyIncome),
-          monthlyExpenses: Number(monthlyExpenses),
-          savingsGoal: Number(savingsGoal),
-          financialGoal
-        })
-      });
+      let data: { title?: string; weeks?: Week[] } | null = null;
 
-      if (!res.ok) throw new Error("Failed to generate");
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        data = generateOfflineRoadmap(inputs);
+      } else {
+        try {
+          const res = await fetch("/api/roadmap", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(inputs),
+          });
+          if (res.ok) {
+            data = await res.json();
+          }
+        } catch {
+          data = null;
+        }
+        if (!data || !data.weeks) {
+          data = generateOfflineRoadmap(inputs);
+        }
+      }
 
-      const data = await res.json();
       const newRoadmap: Roadmap = {
         title: data.title || "Your Personalized Financial Roadmap",
         weeks: data.weeks || [],
-        createdAt: new Date().toISOString()
+        createdAt: new Date().toISOString(),
       };
 
       setRoadmap(newRoadmap);
 
-      // Save roadmap
+      // Save roadmap locally and sync to Firestore if online
       setSaving(true);
-      if (user) {
-        await setDoc(doc(firestore, "roadmaps", user.uid), newRoadmap);
-      } else {
-        localStorage.setItem("atlaslearn_roadmap", JSON.stringify(newRoadmap));
+      localStorage.setItem("atlaslearn_roadmap", JSON.stringify(newRoadmap));
+      if (user && typeof navigator !== "undefined" && navigator.onLine) {
+        setDoc(doc(firestore, "roadmaps", user.uid), newRoadmap).catch(() => {});
       }
-      
+
       confetti({
         particleCount: 150,
         spread: 80,
         origin: { y: 0.5 },
-        colors: ["#6366f1", "#3b82f6", "#f59e0b", "#10b981"]
+        colors: ["#6366f1", "#3b82f6", "#f59e0b", "#10b981"],
       });
-
     } catch (err) {
       console.error(err);
-      alert("Error generating your roadmap. Please try again.");
     } finally {
       setLoading(false);
       setSaving(false);
@@ -149,9 +164,9 @@ export default function RoadmapPage() {
   const handleToggleTask = async (weekNum: number, taskId: string) => {
     if (!roadmap) return;
 
-    const updatedWeeks = roadmap.weeks.map(week => {
+    const updatedWeeks = roadmap.weeks.map((week) => {
       if (week.weekNumber === weekNum) {
-        const updatedTasks = week.tasks.map(task => {
+        const updatedTasks = week.tasks.map((task) => {
           if (task.id === taskId) {
             const nextCompleted = !task.completed;
             if (nextCompleted) {
@@ -160,7 +175,7 @@ export default function RoadmapPage() {
                 particleCount: 30,
                 spread: 50,
                 origin: { y: 0.8 },
-                colors: ["#10b981", "#6366f1"]
+                colors: ["#10b981", "#6366f1"],
               });
             }
             return { ...task, completed: nextCompleted };
@@ -175,11 +190,10 @@ export default function RoadmapPage() {
     const updatedRoadmap = { ...roadmap, weeks: updatedWeeks };
     setRoadmap(updatedRoadmap);
 
-    // Save update
-    if (user) {
-      await setDoc(doc(firestore, "roadmaps", user.uid), updatedRoadmap);
-    } else {
-      localStorage.setItem("atlaslearn_roadmap", JSON.stringify(updatedRoadmap));
+    // Save update locally + Firestore when online
+    localStorage.setItem("atlaslearn_roadmap", JSON.stringify(updatedRoadmap));
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
+      setDoc(doc(firestore, "roadmaps", user.uid), updatedRoadmap).catch(() => {});
     }
   };
 

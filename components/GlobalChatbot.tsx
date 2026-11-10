@@ -11,6 +11,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useStreak } from "@/contexts/StreakContext";
 import { doc, onSnapshot, collection } from "firebase/firestore";
 import { firestore } from "@/lib/firebase";
+import { generateOfflineCoachReply } from "@/lib/offline-engine";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import type { Components } from "react-markdown";
@@ -219,44 +220,58 @@ export default function GlobalChatbot() {
     setMessages(newMessages);
     setLoading(true);
 
+    const userDataPayload = {
+      income,
+      totalExpenses,
+      savingsGoal,
+      streak: streak?.currentStreak ?? 0,
+      level: progress.level,
+      xp: progress.xp,
+      roadmapProgress,
+      latestReportScore,
+    };
+
     try {
-      const res = await fetch("/api/coach", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
-          userData: {
-            income,
-            totalExpenses,
-            savingsGoal,
-            streak: streak?.currentStreak ?? 0,
-            level: progress.level,
-            xp: progress.xp,
-            roadmapProgress,
-            latestReportScore
+      let assistantContent = "";
+
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        await new Promise((r) => setTimeout(r, 400));
+        assistantContent = generateOfflineCoachReply(
+          newMessages.map((m) => ({ role: m.role, content: m.content })),
+          userDataPayload
+        );
+      } else {
+        try {
+          const res = await fetch("/api/coach", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messages: newMessages.map((m) => ({ role: m.role, content: m.content })),
+              userData: userDataPayload,
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            assistantContent = data.message ?? data.content ?? "";
           }
-        }),
-      });
+        } catch {
+          assistantContent = "";
+        }
 
-      if (!res.ok) throw new Error("API error");
+        if (!assistantContent) {
+          assistantContent = generateOfflineCoachReply(
+            newMessages.map((m) => ({ role: m.role, content: m.content })),
+            userDataPayload
+          );
+        }
+      }
 
-      const data = await res.json();
-      const assistantContent = data.message ?? data.content ?? "Sorry, I could not get a response.";
       setMessages((prev) => [
         ...prev,
         { id: Math.random().toString() + "-a", role: "assistant", content: assistantContent },
       ]);
       incrementAICount();
       triggerAction("ai");
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString() + "-err",
-          role: "assistant",
-          content: "Sorry, I'm having trouble connecting to Atlas Coach. Please try again.",
-        },
-      ]);
     } finally {
       setLoading(false);
     }

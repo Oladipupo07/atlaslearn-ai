@@ -11,6 +11,7 @@ import { useGamification } from "@/contexts/GamificationContext";
 import { useStreak } from "@/contexts/StreakContext";
 import { doc, getDoc, setDoc, collection, onSnapshot, query, orderBy } from "firebase/firestore";
 import { firestore } from "@/lib/firebase";
+import { generateOfflineReportCard } from "@/lib/offline-engine";
 import { 
   Radar, RadarChart, PolarGrid, PolarAngleAxis, PolarRadiusAxis, ResponsiveContainer 
 } from "recharts";
@@ -56,40 +57,7 @@ export default function ReportPage() {
   useEffect(() => {
     if (!mounted) return;
 
-    if (user) {
-      // Firebase budgets
-      const budgetRef = doc(firestore, "budgets", user.uid);
-      const expensesRef = collection(firestore, "budgets", user.uid, "expenses");
-      const q = query(expensesRef, orderBy("createdAt", "desc"));
-
-      const unsubBudget = onSnapshot(budgetRef, (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          setIncome(data.income ?? 0);
-          setSavingsGoal(data.savingsGoal ?? 100000);
-        }
-      });
-
-      const unsubExpenses = onSnapshot(q, (snap) => {
-        setExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense)));
-      });
-
-      // Load previous reports history
-      const reportRef = doc(firestore, "reports", user.uid);
-      const unsubReport = onSnapshot(reportRef, (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          const reports = data.history || [];
-          setHistory(reports);
-          if (reports.length > 0 && !report) {
-            setReport(reports[reports.length - 1]); // Load latest
-          }
-        }
-      });
-
-      return () => { unsubBudget(); unsubExpenses(); unsubReport(); };
-    } else {
-      // LocalStorage fallbacks
+    const loadLocalReportData = () => {
       const si = localStorage.getItem("atlaslearn_income");
       const sg = localStorage.getItem("atlaslearn_goal");
       const se = localStorage.getItem("atlaslearn_expenses");
@@ -97,15 +65,77 @@ export default function ReportPage() {
 
       if (si) setIncome(Number(si));
       if (sg) setSavingsGoal(Number(sg));
-      if (se) setExpenses(JSON.parse(se));
-      if (rh) {
-        const parsedHistory = JSON.parse(rh) as ReportCard[];
-        setHistory(parsedHistory);
-        if (parsedHistory.length > 0) {
-          setReport(parsedHistory[parsedHistory.length - 1]);
-        }
+      if (se) {
+        try {
+          setExpenses(JSON.parse(se));
+        } catch {}
       }
+      if (rh) {
+        try {
+          const parsedHistory = JSON.parse(rh) as ReportCard[];
+          setHistory(parsedHistory);
+          if (parsedHistory.length > 0) {
+            setReport(parsedHistory[parsedHistory.length - 1]);
+          }
+        } catch {}
+      }
+    };
+
+    loadLocalReportData();
+
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
+      // Firebase budgets
+      const budgetRef = doc(firestore, "budgets", user.uid);
+      const expensesRef = collection(firestore, "budgets", user.uid, "expenses");
+      const q = query(expensesRef, orderBy("createdAt", "desc"));
+
+      const unsubBudget = onSnapshot(
+        budgetRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            if (data.income !== undefined) setIncome(data.income);
+            if (data.savingsGoal !== undefined) setSavingsGoal(data.savingsGoal);
+          }
+        },
+        () => {}
+      );
+
+      const unsubExpenses = onSnapshot(
+        q,
+        (snap) => {
+          if (!snap.empty) {
+            setExpenses(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense)));
+          }
+        },
+        () => {}
+      );
+
+      // Load previous reports history
+      const reportRef = doc(firestore, "reports", user.uid);
+      const unsubReport = onSnapshot(
+        reportRef,
+        (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            const reports = data.history || [];
+            setHistory(reports);
+            localStorage.setItem("atlaslearn_report_history", JSON.stringify(reports));
+            if (reports.length > 0 && !report) {
+              setReport(reports[reports.length - 1]); // Load latest
+            }
+          }
+        },
+        () => {}
+      );
+
+      return () => {
+        unsubBudget();
+        unsubExpenses();
+        unsubReport();
+      };
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, mounted]);
 
   const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
@@ -138,49 +168,62 @@ export default function ReportPage() {
         level: progress.level,
         aiQuestionsCount: progress.aiQuestionsCount,
         scamChecksCount: progress.scamChecksCount,
-        budgetsCreatedCount: progress.budgetsCreatedCount
+        budgetsCreatedCount: progress.budgetsCreatedCount,
       },
       streak: {
         currentStreak: streak?.currentStreak ?? 0,
-        longestStreak: streak?.longestStreak ?? 0
+        longestStreak: streak?.longestStreak ?? 0,
       },
-      quizzes: quizScores
+      quizzes: quizScores,
     };
 
     try {
-      const res = await fetch("/api/report", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload)
-      });
+      let data: any = null;
+      if (typeof navigator !== "undefined" && !navigator.onLine) {
+        data = generateOfflineReportCard(payload);
+      } else {
+        try {
+          const res = await fetch("/api/report", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (res.ok) {
+            data = await res.json();
+          }
+        } catch {
+          data = null;
+        }
+        if (!data || typeof data.score !== "number") {
+          data = generateOfflineReportCard(payload);
+        }
+      }
 
-      if (!res.ok) throw new Error("Failed to generate report card");
-
-      const data = await res.json();
       const newReport: ReportCard = {
         score: data.score,
         categories: data.categories,
         strengths: data.strengths || [],
         weaknesses: data.weaknesses || [],
         recommendations: data.recommendations || [],
-        date: new Date().toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric" })
+        date: new Date().toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "short",
+          day: "numeric",
+        }),
       };
 
       setReport(newReport);
 
-      // Save to history
+      // Save to history locally and sync to Firestore if online
       const updatedHistory = [...history, newReport];
       setHistory(updatedHistory);
+      localStorage.setItem("atlaslearn_report_history", JSON.stringify(updatedHistory));
 
-      if (user) {
-        await setDoc(doc(firestore, "reports", user.uid), { history: updatedHistory });
-      } else {
-        localStorage.setItem("atlaslearn_report_history", JSON.stringify(updatedHistory));
+      if (user && typeof navigator !== "undefined" && navigator.onLine) {
+        setDoc(doc(firestore, "reports", user.uid), { history: updatedHistory }).catch(() => {});
       }
-
     } catch (err) {
       console.error(err);
-      alert("Error generating financial report card.");
     } finally {
       setLoading(false);
     }
@@ -336,17 +379,18 @@ ${report.recommendations.map(r => `* ${r}`).join("\n")}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               
               {/* Score Circular gauge */}
-              <div className="bg-card border border-border p-6 rounded-3xl shadow-sm text-center flex flex-col justify-center items-center min-h-[300px] relative overflow-hidden print:border-black">
+              <div className="surface-card p-6 rounded-2xl text-center flex flex-col justify-center items-center min-h-[300px] relative overflow-hidden print:border-black">
                 <div className="absolute top-0 right-0 -translate-y-1/2 translate-x-1/2 w-32 h-32 bg-primary/10 rounded-full blur-[60px] print:hidden" />
-                <h3 className="text-sm text-muted-foreground font-bold uppercase tracking-wider mb-6">Financial Grade</h3>
+                <h3 className="text-xs text-muted-foreground font-bold uppercase tracking-widest mb-6">Overall Financial Index</h3>
                 
                 <div className="relative w-44 h-44 flex items-center justify-center">
                   {/* Gauge Ring */}
                   <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
-                    <circle cx="50" cy="50" r="40" stroke="hsl(var(--muted))" strokeWidth="8" fill="transparent" className="opacity-40" />
+                    <circle cx="50" cy="50" r="40" stroke="var(--muted)" strokeWidth="8" fill="transparent" />
                     <motion.circle 
                       cx="50" cy="50" r="40" 
                       stroke="url(#grad)" strokeWidth="8" fill="transparent" 
+                      strokeLinecap="round"
                       strokeDasharray={2 * Math.PI * 40}
                       initial={{ strokeDashoffset: 2 * Math.PI * 40 }}
                       animate={{ strokeDashoffset: 2 * Math.PI * 40 * (1 - report.score / 100) }}
@@ -354,37 +398,59 @@ ${report.recommendations.map(r => `* ${r}`).join("\n")}
                     />
                     <defs>
                       <linearGradient id="grad" x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#6366f1" />
-                        <stop offset="100%" stopColor="#3b82f6" />
+                        <stop offset="0%" stopColor="#10b981" />
+                        <stop offset="100%" stopColor="#06b6d4" />
                       </linearGradient>
                     </defs>
                   </svg>
                   <div className="absolute flex flex-col items-center">
-                    <span className="text-4xl md:text-5xl font-black text-transparent bg-clip-text bg-gradient-to-r from-primary to-blue-500 font-mono">
-                      {report.score}%
+                    <span className="text-4xl md:text-5xl font-black text-foreground tabular-nums">
+                      {report.score}
                     </span>
-                    <span className="text-[10px] text-muted-foreground font-black uppercase tracking-widest mt-1">
-                      {report.score >= 85 ? "Excellent" : report.score >= 70 ? "Good" : report.score >= 50 ? "Average" : "Needs Work"}
+                    <span className="text-[10px] text-primary font-bold uppercase tracking-widest mt-1 px-2 py-0.5 rounded-md bg-primary/10">
+                      {report.score >= 85 ? "Excellent" : report.score >= 70 ? "Strong" : report.score >= 50 ? "Fair" : "Needs Focus"}
                     </span>
                   </div>
                 </div>
                 
-                <p className="text-xs text-muted-foreground mt-6 font-semibold">Report Generated on {report.date}</p>
+                <p className="text-xs text-muted-foreground mt-6 font-medium">Audited on {report.date}</p>
               </div>
 
-              {/* Radar Performance Chart */}
-              <div className="md:col-span-2 bg-card border border-border p-6 rounded-3xl shadow-sm min-h-[300px] flex flex-col justify-between print:border-black">
-                <h3 className="text-sm text-muted-foreground font-bold uppercase tracking-wider mb-4">Fitness Breakdown</h3>
+              {/* Radar Performance Chart + Pillar Bars */}
+              <div className="md:col-span-2 surface-card p-6 rounded-2xl min-h-[300px] flex flex-col justify-between print:border-black">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs text-muted-foreground font-bold uppercase tracking-widest">5-Pillar Telemetry</h3>
+                  <span className="text-xs text-muted-foreground font-mono">Scale: 0 – 100</span>
+                </div>
                 
-                <div className="flex-1 w-full h-64 min-h-[220px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart cx="50%" cy="50%" outerRadius="70%" data={chartData}>
-                      <PolarGrid stroke="var(--border)" />
-                      <PolarAngleAxis dataKey="subject" tick={{ fill: 'var(--muted-foreground)', fontSize: 11, fontWeight: 'bold' }} />
-                      <PolarRadiusAxis angle={30} domain={[0, 100]} tick={{ fill: 'var(--muted-foreground)', fontSize: 10 }} />
-                      <Radar name="User" dataKey="A" stroke="#6366f1" fill="#6366f1" fillOpacity={0.3} />
-                    </RadarChart>
-                  </ResponsiveContainer>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 items-center flex-1">
+                  <div className="w-full h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <RadarChart cx="50%" cy="50%" outerRadius="72%" data={chartData}>
+                        <PolarGrid stroke="var(--border)" />
+                        <PolarAngleAxis dataKey="subject" tick={{ fill: "var(--muted-foreground)", fontSize: 11, fontWeight: 600 }} />
+                        <PolarRadiusAxis angle={30} domain={[0, 100]} tick={false} axisLine={false} />
+                        <Radar name="Score" dataKey="A" stroke="#10b981" strokeWidth={2} fill="#10b981" fillOpacity={0.25} />
+                      </RadarChart>
+                    </ResponsiveContainer>
+                  </div>
+
+                  <div className="space-y-3">
+                    {chartData.map((pillar) => (
+                      <div key={pillar.subject} className="space-y-1">
+                        <div className="flex justify-between text-xs font-semibold tabular-nums">
+                          <span className="text-foreground">{pillar.subject}</span>
+                          <span className="text-muted-foreground font-mono">{pillar.A}/100</span>
+                        </div>
+                        <div className="h-1.5 w-full bg-muted rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-primary rounded-full transition-all duration-500"
+                            style={{ width: `${pillar.A}%` }}
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>

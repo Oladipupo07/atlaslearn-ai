@@ -46,10 +46,83 @@ export const StreakProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (authLoading) return;
 
-    if (!user) {
-      setStreak(null);
-      setLoading(false);
-      setStreakActiveToday(false);
+    const todayStr = new Date().toLocaleDateString("en-CA"); // Always YYYY-MM-DD
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toLocaleDateString("en-CA");
+
+    const computeUpdatedStreak = (
+      currentStreak: number,
+      longestStreak: number,
+      lastActiveDate: string
+    ) => {
+      const updatedStreak = { currentStreak, longestStreak, lastActiveDate };
+      let didIncrement = false;
+
+      if (lastActiveDate === todayStr) {
+        setStreakActiveToday(true);
+      } else if (lastActiveDate === yesterdayStr) {
+        updatedStreak.currentStreak = currentStreak + 1;
+        updatedStreak.longestStreak = Math.max(longestStreak, currentStreak + 1);
+        updatedStreak.lastActiveDate = todayStr;
+        didIncrement = true;
+        setStreakActiveToday(true);
+      } else {
+        updatedStreak.currentStreak = 1;
+        updatedStreak.longestStreak = Math.max(longestStreak, 1);
+        updatedStreak.lastActiveDate = todayStr;
+        didIncrement = true;
+        setStreakActiveToday(true);
+      }
+      return { updatedStreak, didIncrement };
+    };
+
+    const loadLocalStreak = () => {
+      try {
+        const raw = localStorage.getItem("atlaslearn_streaks");
+        const parsed = raw ? JSON.parse(raw) : {};
+        const currentStreak = parsed.currentStreak ?? 0;
+        const longestStreak = parsed.longestStreak ?? 0;
+        const lastActiveDate = parsed.lastActiveDate || parsed.lastCompletionDate || "";
+
+        const { updatedStreak, didIncrement } = computeUpdatedStreak(
+          currentStreak,
+          longestStreak,
+          lastActiveDate
+        );
+
+        localStorage.setItem(
+          "atlaslearn_streaks",
+          JSON.stringify({
+            currentStreak: updatedStreak.currentStreak,
+            longestStreak: updatedStreak.longestStreak,
+            lastActiveDate: updatedStreak.lastActiveDate,
+            lastCompletionDate: updatedStreak.lastActiveDate,
+          })
+        );
+
+        if (didIncrement) {
+          setTimeout(() => {
+            confetti({
+              particleCount: 80,
+              spread: 60,
+              origin: { y: 0.6 },
+              colors: ["#ff4500", "#ff8c00", "#ffd700", "#3b82f6", "#10b981"],
+            });
+            setShowCelebration(true);
+          }, 800);
+        }
+
+        setStreak(updatedStreak);
+      } catch (e) {
+        console.error("Local streak error:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    if (!user || (typeof navigator !== "undefined" && !navigator.onLine)) {
+      loadLocalStreak();
       return;
     }
 
@@ -58,12 +131,6 @@ export const StreakProvider = ({ children }: { children: ReactNode }) => {
         setLoading(true);
         const userRef = doc(firestore, "users", user.uid);
         const userDoc = await getDoc(userRef);
-
-        // Get local YYYY-MM-DD string
-        const todayStr = new Date().toLocaleDateString("en-CA"); // Always YYYY-MM-DD
-        const yesterday = new Date();
-        yesterday.setDate(yesterday.getDate() - 1);
-        const yesterdayStr = yesterday.toLocaleDateString("en-CA");
 
         let currentStreak = 0;
         let longestStreak = 0;
@@ -78,38 +145,33 @@ export const StreakProvider = ({ children }: { children: ReactNode }) => {
           }
         }
 
-        let updatedStreak = { currentStreak, longestStreak, lastActiveDate };
-        let didIncrement = false;
+        const { updatedStreak, didIncrement } = computeUpdatedStreak(
+          currentStreak,
+          longestStreak,
+          lastActiveDate
+        );
 
-        if (lastActiveDate === todayStr) {
-          // Already active today, nothing to change
-          setStreakActiveToday(true);
-        } else if (lastActiveDate === yesterdayStr) {
-          // Streak continues!
-          updatedStreak.currentStreak = currentStreak + 1;
-          updatedStreak.longestStreak = Math.max(longestStreak, currentStreak + 1);
-          updatedStreak.lastActiveDate = todayStr;
-          didIncrement = true;
-          setStreakActiveToday(true);
-        } else {
-          // Streak broken or brand new user
-          updatedStreak.currentStreak = 1;
-          updatedStreak.longestStreak = Math.max(longestStreak, 1);
-          updatedStreak.lastActiveDate = todayStr;
-          didIncrement = true;
-          setStreakActiveToday(true);
-        }
+        // Always cache locally for offline continuity
+        localStorage.setItem(
+          "atlaslearn_streaks",
+          JSON.stringify({
+            currentStreak: updatedStreak.currentStreak,
+            longestStreak: updatedStreak.longestStreak,
+            lastActiveDate: updatedStreak.lastActiveDate,
+            lastCompletionDate: updatedStreak.lastActiveDate,
+          })
+        );
 
         if (didIncrement) {
           await setDoc(userRef, { streak: updatedStreak }, { merge: true });
-          
+
           // Fire confetti and show overlay celebration
           setTimeout(() => {
             confetti({
               particleCount: 80,
               spread: 60,
               origin: { y: 0.6 },
-              colors: ["#ff4500", "#ff8c00", "#ffd700", "#3b82f6", "#10b981"]
+              colors: ["#ff4500", "#ff8c00", "#ffd700", "#3b82f6", "#10b981"],
             });
             setShowCelebration(true);
           }, 800);
@@ -117,7 +179,8 @@ export const StreakProvider = ({ children }: { children: ReactNode }) => {
 
         setStreak(updatedStreak);
       } catch (error) {
-        console.error("Error loading or updating daily streak:", error);
+        console.error("Error loading or updating daily streak, falling back to local:", error);
+        loadLocalStreak();
       } finally {
         setLoading(false);
       }

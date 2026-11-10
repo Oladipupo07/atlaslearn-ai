@@ -14,6 +14,7 @@ export interface ProgressData {
   aiQuestionsCount: number;
   scamChecksCount: number;
   budgetsCreatedCount: number;
+  quizzes?: number;
 }
 
 export interface StreakData {
@@ -203,27 +204,30 @@ export const GamificationProvider = ({ children }: { children: ReactNode }) => {
   useEffect(() => {
     if (authLoading) return;
 
-    if (!user) {
-      // Load from localStorage fallback
+    const loadFromLocalStorage = () => {
       const localProgress = localStorage.getItem("atlaslearn_progress");
       const localStreak = localStorage.getItem("atlaslearn_streaks");
       const localBadges = localStorage.getItem("atlaslearn_badges");
       const localChallenge = localStorage.getItem("atlaslearn_challenges");
 
-      let parsedProgress: ProgressData = localProgress
+      const parsedProgress: ProgressData = localProgress
         ? JSON.parse(localProgress)
-        : { xp: 0, level: 1, aiQuestionsCount: 0, scamChecksCount: 0, budgetsCreatedCount: 0 };
-      
-      let parsedStreak: StreakData = localStreak
+        : { xp: 0, level: 1, aiQuestionsCount: 0, scamChecksCount: 0, budgetsCreatedCount: 0, quizzes: 0 };
+
+      const parsedStreak: StreakData = localStreak
         ? JSON.parse(localStreak)
         : { currentStreak: 0, longestStreak: 0, lastCompletionDate: "" };
 
-      let parsedBadges: BadgeData = localBadges ? JSON.parse(localBadges) : { unlocked: {} };
-      
+      const parsedBadges: BadgeData = localBadges ? JSON.parse(localBadges) : { unlocked: {} };
+
       let parsedChallenge: ChallengeData | null = localChallenge ? JSON.parse(localChallenge) : null;
 
       // Handle daily streak check/reset on load
-      if (parsedStreak.lastCompletionDate && parsedStreak.lastCompletionDate !== todayStr && parsedStreak.lastCompletionDate !== yesterdayStr) {
+      if (
+        parsedStreak.lastCompletionDate &&
+        parsedStreak.lastCompletionDate !== todayStr &&
+        parsedStreak.lastCompletionDate !== yesterdayStr
+      ) {
         parsedStreak.currentStreak = 0;
         localStorage.setItem("atlaslearn_streaks", JSON.stringify(parsedStreak));
       }
@@ -245,83 +249,119 @@ export const GamificationProvider = ({ children }: { children: ReactNode }) => {
       setBadges(parsedBadges);
       setChallenge(parsedChallenge);
       setLoading(false);
+    };
+
+    if (!user || (typeof navigator !== "undefined" && !navigator.onLine)) {
+      loadFromLocalStorage();
       return;
     }
 
+    // Seed with localStorage first so UI never blocks if network is slow
+    loadFromLocalStorage();
+
     // Load from Firestore
-    setLoading(true);
     const progressRef = doc(firestore, "progress", user.uid);
     const streaksRef = doc(firestore, "streaks", user.uid);
     const badgesRef = doc(firestore, "badges", user.uid);
     const challengesRef = doc(firestore, "challenges", user.uid);
 
-    const unsubProgress = onSnapshot(progressRef, (snap) => {
-      if (snap.exists()) {
-        setProgress(snap.data() as ProgressData);
-      } else {
-        const initial = { xp: 0, level: 1, aiQuestionsCount: 0, scamChecksCount: 0, budgetsCreatedCount: 0 };
-        setDoc(progressRef, initial);
-        setProgress(initial);
-      }
-    });
-
-    const unsubStreaks = onSnapshot(streaksRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data() as StreakData;
-        // Check reset
-        if (data.lastCompletionDate && data.lastCompletionDate !== todayStr && data.lastCompletionDate !== yesterdayStr && data.currentStreak > 0) {
-          const resetStreak = { ...data, currentStreak: 0 };
-          setDoc(streaksRef, resetStreak);
-          setStreak(resetStreak);
+    const unsubProgress = onSnapshot(
+      progressRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as ProgressData;
+          setProgress(data);
+          localStorage.setItem("atlaslearn_progress", JSON.stringify(data));
         } else {
-          setStreak(data);
+          const initial = { xp: 0, level: 1, aiQuestionsCount: 0, scamChecksCount: 0, budgetsCreatedCount: 0, quizzes: 0 };
+          setDoc(progressRef, initial).catch(() => {});
+          setProgress(initial);
         }
-      } else {
-        const initial = { currentStreak: 0, longestStreak: 0, lastCompletionDate: "" };
-        setDoc(streaksRef, initial);
-        setStreak(initial);
-      }
-    });
+      },
+      () => {}
+    );
 
-    const unsubBadges = onSnapshot(badgesRef, (snap) => {
-      if (snap.exists()) {
-        setBadges(snap.data() as BadgeData);
-      } else {
-        const initial = { unlocked: {} };
-        setDoc(badgesRef, initial);
-        setBadges(initial);
-      }
-    });
+    const unsubStreaks = onSnapshot(
+      streaksRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as StreakData;
+          if (
+            data.lastCompletionDate &&
+            data.lastCompletionDate !== todayStr &&
+            data.lastCompletionDate !== yesterdayStr &&
+            data.currentStreak > 0
+          ) {
+            const resetStreak = { ...data, currentStreak: 0 };
+            setDoc(streaksRef, resetStreak).catch(() => {});
+            setStreak(resetStreak);
+            localStorage.setItem("atlaslearn_streaks", JSON.stringify(resetStreak));
+          } else {
+            setStreak(data);
+            localStorage.setItem("atlaslearn_streaks", JSON.stringify(data));
+          }
+        } else {
+          const initial = { currentStreak: 0, longestStreak: 0, lastCompletionDate: "" };
+          setDoc(streaksRef, initial).catch(() => {});
+          setStreak(initial);
+        }
+      },
+      () => {}
+    );
 
-    const unsubChallenges = onSnapshot(challengesRef, (snap) => {
-      if (snap.exists()) {
-        const data = snap.data() as ChallengeData;
-        if (data.date !== todayStr) {
+    const unsubBadges = onSnapshot(
+      badgesRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as BadgeData;
+          setBadges(data);
+          localStorage.setItem("atlaslearn_badges", JSON.stringify(data));
+        } else {
+          const initial = { unlocked: {} };
+          setDoc(badgesRef, initial).catch(() => {});
+          setBadges(initial);
+        }
+      },
+      () => {}
+    );
+
+    const unsubChallenges = onSnapshot(
+      challengesRef,
+      (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as ChallengeData;
+          if (data.date !== todayStr) {
+            const challengeDef = getDailyChallengeDef(todayStr);
+            const newChallenge = {
+              date: todayStr,
+              challengeId: challengeDef.id,
+              completed: false,
+              completionDate: null,
+            };
+            setDoc(challengesRef, newChallenge).catch(() => {});
+            setChallenge(newChallenge);
+            localStorage.setItem("atlaslearn_challenges", JSON.stringify(newChallenge));
+          } else {
+            setChallenge(data);
+            localStorage.setItem("atlaslearn_challenges", JSON.stringify(data));
+          }
+        } else {
           const challengeDef = getDailyChallengeDef(todayStr);
-          const newChallenge = {
+          const initial = {
             date: todayStr,
             challengeId: challengeDef.id,
             completed: false,
             completionDate: null,
           };
-          setDoc(challengesRef, newChallenge);
-          setChallenge(newChallenge);
-        } else {
-          setChallenge(data);
+          setDoc(challengesRef, initial).catch(() => {});
+          setChallenge(initial);
         }
-      } else {
-        const challengeDef = getDailyChallengeDef(todayStr);
-        const initial = {
-          date: todayStr,
-          challengeId: challengeDef.id,
-          completed: false,
-          completionDate: null,
-        };
-        setDoc(challengesRef, initial);
-        setChallenge(initial);
+        setLoading(false);
+      },
+      () => {
+        setLoading(false);
       }
-      setLoading(false);
-    });
+    );
 
     return () => {
       unsubProgress();
@@ -331,48 +371,85 @@ export const GamificationProvider = ({ children }: { children: ReactNode }) => {
     };
   }, [user, authLoading]);
 
+  // Sync local changes back to Firestore automatically when coming back online
+  useEffect(() => {
+    if (!user) return;
+
+    const handleOnlineSync = () => {
+      try {
+        const localProgress = localStorage.getItem("atlaslearn_progress");
+        const localStreak = localStorage.getItem("atlaslearn_streaks");
+        const localBadges = localStorage.getItem("atlaslearn_badges");
+        const localChallenge = localStorage.getItem("atlaslearn_challenges");
+        const localRoadmap = localStorage.getItem("atlaslearn_roadmap");
+        const localReports = localStorage.getItem("atlaslearn_report_history");
+
+        if (localProgress) {
+          setDoc(doc(firestore, "progress", user.uid), JSON.parse(localProgress), { merge: true }).catch(() => {});
+        }
+        if (localStreak) {
+          setDoc(doc(firestore, "streaks", user.uid), JSON.parse(localStreak), { merge: true }).catch(() => {});
+        }
+        if (localBadges) {
+          setDoc(doc(firestore, "badges", user.uid), JSON.parse(localBadges), { merge: true }).catch(() => {});
+        }
+        if (localChallenge) {
+          setDoc(doc(firestore, "challenges", user.uid), JSON.parse(localChallenge), { merge: true }).catch(() => {});
+        }
+        if (localRoadmap) {
+          setDoc(doc(firestore, "roadmaps", user.uid), JSON.parse(localRoadmap), { merge: true }).catch(() => {});
+        }
+        if (localReports) {
+          setDoc(doc(firestore, "reports", user.uid), { history: JSON.parse(localReports) }, { merge: true }).catch(() => {});
+        }
+      } catch {}
+    };
+
+    window.addEventListener("online", handleOnlineSync);
+    return () => window.removeEventListener("online", handleOnlineSync);
+  }, [user]);
+
   // Sync state helpers
   const saveProgress = async (newProgress: ProgressData) => {
     setProgress(newProgress);
-    if (user) {
-      await setDoc(doc(firestore, "progress", user.uid), newProgress, { merge: true });
-    } else {
-      localStorage.setItem("atlaslearn_progress", JSON.stringify(newProgress));
+    localStorage.setItem("atlaslearn_progress", JSON.stringify(newProgress));
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
+      setDoc(doc(firestore, "progress", user.uid), newProgress, { merge: true }).catch(() => {});
     }
   };
 
   const saveStreak = async (newStreak: StreakData) => {
     setStreak(newStreak);
-    if (user) {
-      await setDoc(doc(firestore, "streaks", user.uid), newStreak, { merge: true });
-      // Sync back to users collection to keep old code compatible
-      await setDoc(doc(firestore, "users", user.uid), {
-        streak: {
-          currentStreak: newStreak.currentStreak,
-          longestStreak: newStreak.longestStreak,
-          lastActiveDate: newStreak.lastCompletionDate
-        }
-      }, { merge: true });
-    } else {
-      localStorage.setItem("atlaslearn_streaks", JSON.stringify(newStreak));
+    localStorage.setItem("atlaslearn_streaks", JSON.stringify(newStreak));
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
+      setDoc(doc(firestore, "streaks", user.uid), newStreak, { merge: true }).catch(() => {});
+      setDoc(
+        doc(firestore, "users", user.uid),
+        {
+          streak: {
+            currentStreak: newStreak.currentStreak,
+            longestStreak: newStreak.longestStreak,
+            lastActiveDate: newStreak.lastCompletionDate,
+          },
+        },
+        { merge: true }
+      ).catch(() => {});
     }
   };
 
   const saveBadges = async (newBadges: BadgeData) => {
     setBadges(newBadges);
-    if (user) {
-      await setDoc(doc(firestore, "badges", user.uid), newBadges, { merge: true });
-    } else {
-      localStorage.setItem("atlaslearn_badges", JSON.stringify(newBadges));
+    localStorage.setItem("atlaslearn_badges", JSON.stringify(newBadges));
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
+      setDoc(doc(firestore, "badges", user.uid), newBadges, { merge: true }).catch(() => {});
     }
   };
 
   const saveChallenge = async (newChallenge: ChallengeData) => {
     setChallenge(newChallenge);
-    if (user) {
-      await setDoc(doc(firestore, "challenges", user.uid), newChallenge, { merge: true });
-    } else {
-      localStorage.setItem("atlaslearn_challenges", JSON.stringify(newChallenge));
+    localStorage.setItem("atlaslearn_challenges", JSON.stringify(newChallenge));
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
+      setDoc(doc(firestore, "challenges", user.uid), newChallenge, { merge: true }).catch(() => {});
     }
   };
 
@@ -519,11 +596,19 @@ export const GamificationProvider = ({ children }: { children: ReactNode }) => {
 
   // Action dispatcher for easy auto-challenge completion
   const triggerAction = async (actionType: "quiz" | "ai" | "scam" | "budget" | "savings") => {
+    if (actionType === "quiz") {
+      const nextProgress = {
+        ...progress,
+        quizzes: (progress.quizzes ?? 0) + 1,
+      };
+      await saveProgress(nextProgress);
+    }
+
     // Check if it matches today's challenge
     if (!challenge.completed) {
       const def = getDailyChallengeDef(todayStr);
-      
-      const isMatch = 
+
+      const isMatch =
         (actionType === "quiz" && def.id === "complete_quiz") ||
         (actionType === "ai" && def.id === "ask_ai") ||
         (actionType === "scam" && def.id === "detect_scam") ||
@@ -653,7 +738,7 @@ export const GamificationProvider = ({ children }: { children: ReactNode }) => {
 
                   <h3 className="text-2xl font-black tracking-tight mb-2 text-amber-500">Badge Unlocked!</h3>
                   <p className="text-muted-foreground text-sm max-w-xs mb-6">
-                    Congratulations! You unlocked the **{badge.title}** achievement badge!
+                    Congratulations! You unlocked the <strong className="text-foreground font-bold">{badge.title}</strong> achievement badge!
                   </p>
 
                   <div className="bg-muted/40 border border-border/50 p-4 rounded-2xl mb-6 w-full">

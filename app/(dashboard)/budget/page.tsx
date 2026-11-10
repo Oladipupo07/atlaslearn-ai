@@ -109,59 +109,7 @@ export default function BudgetPage() {
     if (!mounted) return;
     setLoadingData(true);
 
-    if (user) {
-      const budgetRef = doc(firestore, "budgets", user.uid, "daily", viewingDate);
-      const expensesRef = collection(firestore, "budgets", user.uid, "daily", viewingDate, "expenses");
-      const q = query(expensesRef, orderBy("createdAt", "desc"));
-
-      const unsubBudget = onSnapshot(budgetRef, async (snap) => {
-        if (snap.exists()) {
-          const data = snap.data();
-          setIncome(data.income ?? 500000);
-          setIncomePeriod(data.incomePeriod ?? "Monthly");
-          setSavingsGoal(data.savingsGoal ?? 100000);
-        } else {
-          // New day — try to get the remaining balance from the previous day
-          try {
-            const dailyRef = collection(firestore, "budgets", user.uid, "daily");
-            const snapDocs = await getDocs(query(dailyRef, orderBy("date", "desc")));
-            const prevDoc = snapDocs.docs.find((d) => d.id < viewingDate);
-            if (prevDoc) {
-              const prevData = prevDoc.data();
-              const expRef = collection(firestore, "budgets", user.uid, "daily", prevDoc.id, "expenses");
-              const expSnap = await getDocs(expRef);
-              const totalExp = expSnap.docs.reduce((acc, e) => acc + (e.data().amount ?? 0), 0);
-              const remaining = (prevData.income ?? 0) - totalExp;
-              
-              setIncome(remaining >= 0 ? remaining : 0);
-              setIncomePeriod(prevData.incomePeriod ?? "Monthly");
-              setSavingsGoal(prevData.savingsGoal ?? 100000);
-            } else {
-              setIncome(500000);
-              setIncomePeriod("Monthly");
-              setSavingsGoal(100000);
-            }
-          } catch (err) {
-            console.error("Error loading previous day balance:", err);
-            setIncome(500000);
-            setIncomePeriod("Monthly");
-            setSavingsGoal(100000);
-          }
-        }
-        setLoadingData(false);
-      });
-
-      const unsubExpenses = onSnapshot(q, (snap) => {
-        const data: Expense[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense));
-        setExpenses(data);
-      });
-
-      return () => {
-        unsubBudget();
-        unsubExpenses();
-      };
-    } else {
-      // localStorage fallback keyed by date
+    const loadLocalBudget = () => {
       const si = localStorage.getItem(lsKey("income"));
       const sp = localStorage.getItem(lsKey("period"));
       const sg = localStorage.getItem(lsKey("goal"));
@@ -204,25 +152,96 @@ export default function BudgetPage() {
         setExpenses([]);
       }
       setLoadingData(false);
+    };
+
+    if (!user || (typeof navigator !== "undefined" && !navigator.onLine)) {
+      loadLocalBudget();
+      return;
     }
+
+    // Load local cache first so UI renders immediately
+    loadLocalBudget();
+
+    const budgetRef = doc(firestore, "budgets", user.uid, "daily", viewingDate);
+    const expensesRef = collection(firestore, "budgets", user.uid, "daily", viewingDate, "expenses");
+    const q = query(expensesRef, orderBy("createdAt", "desc"));
+
+    const unsubBudget = onSnapshot(
+      budgetRef,
+      async (snap) => {
+        if (snap.exists()) {
+          const data = snap.data();
+          setIncome(data.income ?? 500000);
+          setIncomePeriod(data.incomePeriod ?? "Monthly");
+          setSavingsGoal(data.savingsGoal ?? 100000);
+        } else {
+          // New day — try to get the remaining balance from the previous day
+          try {
+            const dailyRef = collection(firestore, "budgets", user.uid, "daily");
+            const snapDocs = await getDocs(query(dailyRef, orderBy("date", "desc")));
+            const prevDoc = snapDocs.docs.find((d) => d.id < viewingDate);
+            if (prevDoc) {
+              const prevData = prevDoc.data();
+              const expRef = collection(firestore, "budgets", user.uid, "daily", prevDoc.id, "expenses");
+              const expSnap = await getDocs(expRef);
+              const totalExp = expSnap.docs.reduce((acc, e) => acc + (e.data().amount ?? 0), 0);
+              const remaining = (prevData.income ?? 0) - totalExp;
+
+              setIncome(remaining >= 0 ? remaining : 0);
+              setIncomePeriod(prevData.incomePeriod ?? "Monthly");
+              setSavingsGoal(prevData.savingsGoal ?? 100000);
+            }
+          } catch (err) {
+            console.error("Error loading previous day balance:", err);
+          }
+        }
+        setLoadingData(false);
+      },
+      () => {
+        setLoadingData(false);
+      }
+    );
+
+    const unsubExpenses = onSnapshot(
+      q,
+      (snap) => {
+        const data: Expense[] = snap.docs.map((d) => ({ id: d.id, ...d.data() } as Expense));
+        setExpenses(data);
+        localStorage.setItem(lsKey("expenses"), JSON.stringify(data));
+        if (isToday) {
+          localStorage.setItem("atlaslearn_expenses", JSON.stringify(data));
+        }
+      },
+      () => {}
+    );
+
+    return () => {
+      unsubBudget();
+      unsubExpenses();
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, mounted, viewingDate]);
 
   // Sync income/goal to storage when they change (only for today, history is read-only display)
   useEffect(() => {
     if (!mounted || loadingData || !isToday) return;
-    if (user) {
+
+    // Always persist locally so offline mode and other pages stay in sync
+    localStorage.setItem(lsKey("income"), income.toString());
+    localStorage.setItem(lsKey("period"), incomePeriod);
+    localStorage.setItem(lsKey("goal"), savingsGoal.toString());
+    localStorage.setItem("atlaslearn_income", income.toString());
+    localStorage.setItem("atlaslearn_income_period", incomePeriod);
+    localStorage.setItem("atlaslearn_goal", savingsGoal.toString());
+
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
       const budgetRef = doc(firestore, "budgets", user.uid, "daily", viewingDate);
-      setDoc(budgetRef, { income, incomePeriod, savingsGoal, date: viewingDate }, { merge: true });
-      incrementBudgetCount();
-      triggerAction("budget");
-    } else {
-      localStorage.setItem(lsKey("income"), income.toString());
-      localStorage.setItem(lsKey("period"), incomePeriod);
-      localStorage.setItem(lsKey("goal"), savingsGoal.toString());
-      incrementBudgetCount();
-      triggerAction("budget");
+      setDoc(budgetRef, { income, incomePeriod, savingsGoal, date: viewingDate }, { merge: true }).catch(() => {});
+      const rootBudgetRef = doc(firestore, "budgets", user.uid);
+      setDoc(rootBudgetRef, { income, incomePeriod, savingsGoal }, { merge: true }).catch(() => {});
     }
+    incrementBudgetCount();
+    triggerAction("budget");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [income, incomePeriod, savingsGoal, user, mounted, loadingData, isToday]);
 
@@ -230,28 +249,7 @@ export default function BudgetPage() {
   const loadHistory = async () => {
     setLoadingHistory(true);
     try {
-      if (user) {
-        const dailyRef = collection(firestore, "budgets", user.uid, "daily");
-        const snap = await getDocs(dailyRef);
-        const summaries: DailyBudgetSummary[] = [];
-        for (const d of snap.docs) {
-          const data = d.data();
-          // Fetch expenses total for this day
-          const expRef = collection(firestore, "budgets", user.uid, "daily", d.id, "expenses");
-          const expSnap = await getDocs(expRef);
-          const totalExpenses = expSnap.docs.reduce((acc, e) => acc + (e.data().amount ?? 0), 0);
-          summaries.push({
-            date: d.id,
-            income: data.income ?? 0,
-            incomePeriod: data.incomePeriod ?? "Monthly",
-            savingsGoal: data.savingsGoal ?? 0,
-            totalExpenses,
-          });
-        }
-        summaries.sort((a, b) => b.date.localeCompare(a.date));
-        setHistory(summaries);
-      } else {
-        // Read all localStorage keys matching our pattern
+      const loadLocalHistory = () => {
         const summaries: DailyBudgetSummary[] = [];
         for (let i = 0; i < localStorage.length; i++) {
           const key = localStorage.key(i);
@@ -268,7 +266,48 @@ export default function BudgetPage() {
         }
         summaries.sort((a, b) => b.date.localeCompare(a.date));
         setHistory(summaries);
+      };
+
+      if (user && typeof navigator !== "undefined" && navigator.onLine) {
+        const dailyRef = collection(firestore, "budgets", user.uid, "daily");
+        const snap = await getDocs(dailyRef);
+        const summaries: DailyBudgetSummary[] = [];
+        for (const d of snap.docs) {
+          const data = d.data();
+          const expRef = collection(firestore, "budgets", user.uid, "daily", d.id, "expenses");
+          const expSnap = await getDocs(expRef);
+          const totalExpenses = expSnap.docs.reduce((acc, e) => acc + (e.data().amount ?? 0), 0);
+          summaries.push({
+            date: d.id,
+            income: data.income ?? 0,
+            incomePeriod: data.incomePeriod ?? "Monthly",
+            savingsGoal: data.savingsGoal ?? 0,
+            totalExpenses,
+          });
+        }
+        summaries.sort((a, b) => b.date.localeCompare(a.date));
+        setHistory(summaries);
+      } else {
+        loadLocalHistory();
       }
+    } catch {
+      // Fallback to localStorage on error
+      const summaries: DailyBudgetSummary[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key && key.startsWith("atlaslearn_budget_") && key.endsWith("_income")) {
+          const dateKey = key.replace("atlaslearn_budget_", "").replace("_income", "");
+          const inc = Number(localStorage.getItem(`atlaslearn_budget_${dateKey}_income`) ?? 0);
+          const period = localStorage.getItem(`atlaslearn_budget_${dateKey}_period`) ?? "Monthly";
+          const goal = Number(localStorage.getItem(`atlaslearn_budget_${dateKey}_goal`) ?? 0);
+          const expRaw = localStorage.getItem(`atlaslearn_budget_${dateKey}_expenses`);
+          const exps: Expense[] = expRaw ? JSON.parse(expRaw) : [];
+          const totalExpenses = exps.reduce((a, e) => a + e.amount, 0);
+          summaries.push({ date: dateKey, income: inc, incomePeriod: period, savingsGoal: goal, totalExpenses });
+        }
+      }
+      summaries.sort((a, b) => b.date.localeCompare(a.date));
+      setHistory(summaries);
     } finally {
       setLoadingHistory(false);
     }
@@ -300,19 +339,24 @@ export default function BudgetPage() {
     };
 
     try {
-      if (user) {
+      const updated = [newExpense, ...expenses];
+      setExpenses(updated);
+      localStorage.setItem(lsKey("expenses"), JSON.stringify(updated));
+      localStorage.setItem("atlaslearn_expenses", JSON.stringify(updated));
+
+      if (user && typeof navigator !== "undefined" && navigator.onLine) {
         const expRef = doc(
           collection(firestore, "budgets", user.uid, "daily", viewingDate, "expenses"),
           newExpense.id
         );
-        await setDoc(expRef, newExpense);
-        // Update summary on budget doc
+        setDoc(expRef, newExpense).catch(() => {});
+        const rootExpRef = doc(
+          collection(firestore, "budgets", user.uid, "expenses"),
+          newExpense.id
+        );
+        setDoc(rootExpRef, newExpense).catch(() => {});
         const budgetRef = doc(firestore, "budgets", user.uid, "daily", viewingDate);
-        await setDoc(budgetRef, { income, incomePeriod, savingsGoal, date: viewingDate }, { merge: true });
-      } else {
-        const updated = [newExpense, ...expenses];
-        setExpenses(updated);
-        localStorage.setItem(lsKey("expenses"), JSON.stringify(updated));
+        setDoc(budgetRef, { income, incomePeriod, savingsGoal, date: viewingDate }, { merge: true }).catch(() => {});
       }
       setNewName("");
       setNewAmount("");
@@ -323,12 +367,14 @@ export default function BudgetPage() {
 
   const deleteExpense = async (id: string) => {
     if (!isToday) return; // can't edit past budgets
-    if (user) {
-      await deleteDoc(doc(firestore, "budgets", user.uid, "daily", viewingDate, "expenses", id));
-    } else {
-      const updated = expenses.filter((exp) => exp.id !== id);
-      setExpenses(updated);
-      localStorage.setItem(lsKey("expenses"), JSON.stringify(updated));
+    const updated = expenses.filter((exp) => exp.id !== id);
+    setExpenses(updated);
+    localStorage.setItem(lsKey("expenses"), JSON.stringify(updated));
+    localStorage.setItem("atlaslearn_expenses", JSON.stringify(updated));
+
+    if (user && typeof navigator !== "undefined" && navigator.onLine) {
+      deleteDoc(doc(firestore, "budgets", user.uid, "daily", viewingDate, "expenses", id)).catch(() => {});
+      deleteDoc(doc(firestore, "budgets", user.uid, "expenses", id)).catch(() => {});
     }
   };
 
@@ -418,59 +464,62 @@ export default function BudgetPage() {
 
       {/* Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-card/60 backdrop-blur-sm border border-border p-6 rounded-2xl shadow-sm">
+        <div className="surface-card p-6 rounded-2xl">
           <div className="flex items-center justify-between mb-3">
             <div className="flex items-center space-x-3">
-              <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary">
-                <Wallet className="w-5 h-5" />
+              <div className="w-9 h-9 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                <Wallet className="w-4 h-4" />
               </div>
-              <h2 className="text-muted-foreground font-medium text-sm">Income</h2>
+              <h2 className="text-muted-foreground font-semibold text-xs uppercase tracking-wider">Inflow ({incomePeriod})</h2>
             </div>
             {isToday ? (
               <select
                 value={incomePeriod}
                 onChange={(e) => setIncomePeriod(e.target.value)}
-                className="text-xs bg-muted/50 border border-border text-muted-foreground rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-primary cursor-pointer"
+                className="text-xs bg-muted border border-border text-foreground font-medium rounded-lg px-2.5 py-1 outline-none focus:ring-1 focus:ring-primary cursor-pointer"
               >
                 <option value="Weekly">Weekly</option>
                 <option value="Monthly">Monthly</option>
               </select>
             ) : (
-              <span className="text-xs bg-muted/50 border border-border text-muted-foreground rounded-lg px-2 py-1">
+              <span className="text-xs bg-muted border border-border text-muted-foreground rounded-lg px-2.5 py-1">
                 {incomePeriod}
               </span>
             )}
           </div>
           {isToday ? (
-            <input
-              type="number"
-              value={income || ""}
-              onChange={(e) => setIncome(Number(e.target.value))}
-              className="text-3xl font-bold bg-transparent border-none focus:ring-0 w-full outline-none text-foreground"
-            />
+            <div className="flex items-baseline gap-1 border-b border-dashed border-border focus-within:border-primary pb-1">
+              <span className="text-2xl font-bold text-muted-foreground">₦</span>
+              <input
+                type="number"
+                value={income || ""}
+                onChange={(e) => setIncome(Number(e.target.value))}
+                className="text-2xl md:text-3xl font-bold bg-transparent border-none focus:ring-0 w-full outline-none text-foreground tabular-nums"
+              />
+            </div>
           ) : (
-            <p className="text-3xl font-bold">₦{income.toLocaleString()}</p>
+            <p className="text-2xl md:text-3xl font-bold tabular-nums">₦{income.toLocaleString()}</p>
           )}
         </div>
 
-        <div className="bg-card/60 backdrop-blur-sm border border-border p-6 rounded-2xl shadow-sm">
+        <div className="surface-card p-6 rounded-2xl">
           <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-destructive/10 flex items-center justify-center text-destructive">
-              <ReceiptText className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-destructive/10 border border-destructive/20 flex items-center justify-center text-destructive">
+              <ReceiptText className="w-4 h-4" />
             </div>
-            <h2 className="text-muted-foreground font-medium text-sm">Total Expenses</h2>
+            <h2 className="text-muted-foreground font-semibold text-xs uppercase tracking-wider">Logged Outflow</h2>
           </div>
-          <p className="text-3xl font-bold">₦{totalExpenses.toLocaleString()}</p>
+          <p className="text-2xl md:text-3xl font-bold tabular-nums">₦{totalExpenses.toLocaleString()}</p>
         </div>
 
-        <div className="bg-card/60 backdrop-blur-sm border border-border p-6 rounded-2xl shadow-sm">
+        <div className="surface-card p-6 rounded-2xl">
           <div className="flex items-center space-x-3 mb-3">
-            <div className="w-10 h-10 rounded-xl bg-blue-500/10 flex items-center justify-center text-blue-500">
-              <PiggyBank className="w-5 h-5" />
+            <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-500">
+              <PiggyBank className="w-4 h-4" />
             </div>
-            <h2 className="text-muted-foreground font-medium text-sm">Remaining Balance</h2>
+            <h2 className="text-muted-foreground font-semibold text-xs uppercase tracking-wider">Net Balance</h2>
           </div>
-          <p className={cn("text-3xl font-bold", remainingBalance < 0 ? "text-destructive" : "")}>
+          <p className={cn("text-2xl md:text-3xl font-bold tabular-nums", remainingBalance < 0 ? "text-destructive" : "")}>
             ₦{remainingBalance.toLocaleString()}
           </p>
         </div>

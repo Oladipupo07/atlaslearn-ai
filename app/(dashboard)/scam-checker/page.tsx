@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ShieldAlert, ShieldCheck, AlertTriangle, ScanSearch, FileText, CheckCircle2, ChevronRight, Copy, Share2 } from "lucide-react";
+import { ShieldAlert, ShieldCheck, AlertTriangle, ScanSearch, FileText, CheckCircle2, ChevronRight, Copy, Share2, History, Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGamification } from "@/contexts/GamificationContext";
 
@@ -12,21 +12,63 @@ type ScamAnalysis = {
   suspiciousKeywords: string[];
   explanation: string;
   tips: string[];
+  messageSnippet?: string;
+  date?: string;
 };
 
 const TEMPLATES = [
-  "URGENT: Your account has been suspended! Please click this link immediately to verify your identity and restore access.",
-  "Congratulations! You've been selected to receive a $500 Amazon Gift card. Click here to claim your prize.",
-  "Hey, it's your boss. I'm in a meeting right now and need you to buy 5 Apple gift cards for a client presentation urgently."
+  "URGENT: Your bank account & BVN have been suspended! Click this link immediately and enter your OTP to restore access.",
+  "Congratulations! Join our VIP WhatsApp Investment platform — invest ₦10,000 today and get ₦50,000 guaranteed in 24 hours!",
+  "Hey, it's your boss. I'm in a meeting right now and need you to buy 5 Apple gift cards for a client presentation urgently.",
 ];
 
-const RED_FLAGS = ["urgent", "suspended", "immediately", "verify", "gift card", "boss", "claim", "prize", "selected", "click here", "password", "ssn", "wire", "crypto"];
+const RED_FLAGS = [
+  "urgent",
+  "suspended",
+  "immediately",
+  "verify",
+  "gift card",
+  "boss",
+  "claim",
+  "prize",
+  "selected",
+  "click here",
+  "password",
+  "ssn",
+  "wire",
+  "crypto",
+  "bvn",
+  "nin",
+  "otp",
+  "pin",
+  "guaranteed",
+  "double your money",
+  "24 hours",
+  "48 hours",
+  "activation fee",
+  "whatsapp",
+  "telegram",
+  "blocked",
+  "ponzi",
+];
 
 export default function ScamDetectorPage() {
   const { incrementScamCount, triggerAction } = useGamification();
   const [text, setText] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [analysis, setAnalysis] = useState<ScamAnalysis | null>(null);
+  const [history, setHistory] = useState<ScamAnalysis[]>([]);
+  const [copied, setCopied] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("atlaslearn_scam_history");
+      if (saved) {
+        const parsed = JSON.parse(saved) as ScamAnalysis[];
+        setHistory(parsed);
+      }
+    } catch {}
+  }, []);
 
   const analyzeText = () => {
     if (!text.trim()) return;
@@ -35,40 +77,66 @@ export default function ScamDetectorPage() {
 
     setTimeout(() => {
       const lowerText = text.toLowerCase();
-      const foundKeywords = RED_FLAGS.filter(flag => lowerText.includes(flag));
+      const foundKeywords = RED_FLAGS.filter((flag) => lowerText.includes(flag));
 
       let risk: "Low" | "Medium" | "High" = "Low";
       let confidence = 90;
-      let exp = "This message seems relatively safe. We couldn't find major red flags, but always verify the sender's identity.";
+      let exp =
+        "This message seems relatively safe. We couldn't find major red flags, but always verify the sender's identity.";
       let tips = [
-        "Never share passwords or OTPs.",
-        "Verify the email address domain, not just the display name."
+        "Never share passwords, PINs, BVN details, or OTPs.",
+        "Verify the official domain or phone number of the sender.",
       ];
 
-      if (foundKeywords.length > 3) {
+      if (foundKeywords.length >= 3) {
         risk = "High";
         confidence = 98;
-        exp = "This message strongly resembles common phishing or scam patterns. It uses urgency and requests immediate action or money/gift cards.";
+        exp =
+          "This message strongly matches known phishing, Ponzi, or impersonation scam patterns. It uses urgency, sensitive credential requests (like OTP/BVN), or unrealistic profit promises.";
         tips = [
-          "Do NOT click any links inside the message.",
-          "If it claims to be from your bank/boss, contact them directly via a known phone number.",
-          "Report and block the sender immediately."
+          "Do NOT click any links or send any activation/registration fees.",
+          "No Nigerian bank or CBN will ever ask for your OTP or PIN via SMS/WhatsApp.",
+          "Report and block the sender immediately.",
         ];
       } else if (foundKeywords.length > 0) {
         risk = "Medium";
-        confidence = 75;
-        exp = "This message contains potentially suspicious language like requests to claim prizes or urgent actions. Proceed with high caution.";
+        confidence = 78;
+        exp =
+          "This message contains potentially suspicious triggers such as urgency, prize claims, or unverified payment prompts. Proceed with extreme caution.";
         tips = [
-          "Think twice before clicking links.",
-          "Check for poor grammar or unusual sender addresses."
+          "Think twice before clicking links or replying.",
+          "Confirm directly with the institution using their official app or customer care line.",
         ];
       }
 
-      setAnalysis({ riskLevel: risk, confidence, suspiciousKeywords: foundKeywords, explanation: exp, tips });
+      const result: ScamAnalysis = {
+        riskLevel: risk,
+        confidence,
+        suspiciousKeywords: foundKeywords,
+        explanation: exp,
+        tips,
+        messageSnippet: text.trim().slice(0, 120),
+        date: new Date().toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      };
+
+      setAnalysis(result);
+      try {
+        const nextHistory = [result, ...history].slice(0, 5);
+        setHistory(nextHistory);
+        localStorage.setItem("atlaslearn_scam_history", JSON.stringify(nextHistory));
+      } catch {}
       setIsScanning(false);
       incrementScamCount();
       triggerAction("scam");
-    }, 2000);
+    }, 900);
+  };
+
+  const handleCopyReport = () => {
+    if (!analysis) return;
+    const summary = `AtlasLearn Scam Check: ${analysis.riskLevel} Risk (${analysis.confidence}% Confidence)\n${analysis.explanation}\nTriggers: ${analysis.suspiciousKeywords.join(", ") || "None"}`;
+    navigator.clipboard.writeText(summary);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const getRiskColor = (risk: "Low" | "Medium" | "High") => {
@@ -242,16 +310,66 @@ export default function ScamDetectorPage() {
 
                 {/* Footer actions */}
                 <div className="p-3 md:p-4 border-t border-border bg-card flex justify-end gap-2">
-                  <button className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition" title="Copy Report">
-                    <Copy className="w-4 h-4 md:w-5 md:h-5" />
+                  <button
+                    onClick={handleCopyReport}
+                    className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition flex items-center gap-1.5 text-xs font-medium"
+                    title="Copy Report"
+                  >
+                    {copied ? <Check className="w-4 h-4 text-primary" /> : <Copy className="w-4 h-4 md:w-5 md:h-5" />}
+                    {copied && <span className="text-primary">Copied</span>}
                   </button>
-                  <button className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition" title="Share Report">
+                  <button
+                    onClick={() => {
+                      if (navigator.share && analysis) {
+                        navigator.share({
+                          title: "AtlasLearn Scam Analysis",
+                          text: `${analysis.riskLevel} Risk: ${analysis.explanation}`,
+                        }).catch(() => {});
+                      } else {
+                        handleCopyReport();
+                      }
+                    }}
+                    className="p-2 text-muted-foreground hover:bg-muted rounded-lg transition"
+                    title="Share Report"
+                  >
                     <Share2 className="w-4 h-4 md:w-5 md:h-5" />
                   </button>
                 </div>
               </motion.div>
             ) : null}
           </AnimatePresence>
+
+          {history.length > 0 && (
+            <div className="mt-4 bg-card border border-border rounded-2xl p-4 shadow-sm">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-3">
+                <History className="w-3.5 h-3.5" /> Recent Offline Scans
+              </h3>
+              <div className="space-y-2">
+                {history.map((item, idx) => (
+                  <button
+                    key={idx}
+                    onClick={() => {
+                      if (item.messageSnippet) setText(item.messageSnippet);
+                      setAnalysis(item);
+                    }}
+                    className="w-full text-left p-2.5 rounded-xl border border-border bg-background hover:bg-muted transition-all flex items-center justify-between gap-2"
+                  >
+                    <span className="text-xs text-foreground truncate flex-1">
+                      {item.messageSnippet || "Scanned message"}
+                    </span>
+                    <span
+                      className={cn(
+                        "text-[10px] font-bold px-2 py-0.5 rounded-full border shrink-0 uppercase",
+                        getRiskColor(item.riskLevel)
+                      )}
+                    >
+                      {item.riskLevel}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
