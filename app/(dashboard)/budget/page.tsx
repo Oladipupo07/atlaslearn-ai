@@ -16,7 +16,13 @@ import {
   ChevronRight,
   History,
   X,
+  Building2,
+  ArrowUpRight,
+  ArrowDownLeft,
 } from "lucide-react";
+import { BankConnectModal } from "@/components/BankConnectModal";
+import { BankingEngine } from "@/lib/banking-service";
+import { LinkedBankAccount, BankTransactionFeed } from "@/types/banking";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGamification } from "@/contexts/GamificationContext";
@@ -97,8 +103,18 @@ export default function BudgetPage() {
   const [newAmount, setNewAmount] = useState("");
   const [newCategory, setNewCategory] = useState(CATEGORIES[0]);
 
+  // Microfinance Banking States
+  const [isBankModalOpen, setIsBankModalOpen] = useState(false);
+  const [linkedAccounts, setLinkedAccounts] = useState<LinkedBankAccount[]>([]);
+  const [bankTransactions, setBankTransactions] = useState<BankTransactionFeed[]>([]);
+
   useEffect(() => {
     setMounted(true);
+    // Load linked MFB accounts & transactions
+    const accs = BankingEngine.getLinkedAccounts();
+    const txns = BankingEngine.getTransactions();
+    setLinkedAccounts(accs);
+    setBankTransactions(txns);
   }, []);
 
   // Helper: storage key for localStorage
@@ -419,6 +435,13 @@ export default function BudgetPage() {
             </div>
           )}
           <button
+            onClick={() => setIsBankModalOpen(true)}
+            className="flex items-center gap-2 text-sm font-medium border border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 px-4 py-2 rounded-xl transition-colors shadow-sm"
+          >
+            <Building2 className="w-4 h-4" />
+            Link MFB Bank
+          </button>
+          <button
             onClick={() => { setShowHistory(true); loadHistory(); }}
             className="flex items-center gap-2 text-sm font-medium border border-border bg-card/60 hover:bg-muted px-4 py-2 rounded-xl transition-colors"
           >
@@ -452,6 +475,56 @@ export default function BudgetPage() {
           <ChevronRight className="w-4 h-4" />
         </button>
       </div>
+
+      {/* Connected MFB Strip */}
+      {linkedAccounts.length > 0 && (
+        <div className="surface-card p-5 rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/5 via-card to-card">
+          <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center text-primary">
+                <Building2 className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold tracking-tight">Connected Microfinance Banks</h3>
+                <p className="text-xs text-muted-foreground">Live balance telemetry & automated expense extraction</p>
+              </div>
+            </div>
+            <button
+              onClick={() => setIsBankModalOpen(true)}
+              className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+            >
+              + Link Another MFB
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {linkedAccounts.map((acc) => (
+              <div
+                key={acc.id}
+                className="p-4 rounded-xl border border-border/80 bg-background/80 flex items-center justify-between shadow-sm"
+              >
+                <div>
+                  <p className="text-xs font-semibold text-foreground">{acc.institutionName}</p>
+                  <p className="text-[11px] text-muted-foreground">{acc.accountNumberMasked} • {acc.accountName}</p>
+                  <p className="text-base font-bold text-emerald-500 font-mono mt-1">
+                    ₦{acc.availableBalance.toLocaleString()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => {
+                    BankingEngine.disconnectAccount(acc.id);
+                    setLinkedAccounts(BankingEngine.getLinkedAccounts());
+                  }}
+                  className="text-muted-foreground hover:text-destructive p-1 rounded-lg text-xs"
+                  title="Disconnect account"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {!isToday && (
         <div className="flex items-center justify-center">
@@ -775,6 +848,16 @@ export default function BudgetPage() {
           </>
         )}
       </AnimatePresence>
+
+      {/* MFB Connect Modal */}
+      <BankConnectModal
+        isOpen={isBankModalOpen}
+        onClose={() => setIsBankModalOpen(false)}
+        onAccountLinked={(acc) => {
+          setLinkedAccounts(BankingEngine.getLinkedAccounts());
+          setBankTransactions(BankingEngine.getTransactions());
+        }}
+      />
     </motion.div>
   );
 }
