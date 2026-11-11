@@ -4,8 +4,11 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   ClipboardList, Sparkles, AlertTriangle, ShieldCheck, Check, 
-  X, Loader2, Download, Printer, TrendingUp, History, HelpCircle, ChevronRight
+  X, Loader2, Download, Printer, TrendingUp, History, HelpCircle, ChevronRight,
+  Building2, BadgePercent, ArrowRight
 } from "lucide-react";
+import { BankingEngine } from "@/lib/banking-service";
+import { MFBCreditAssessment, LinkedBankAccount } from "@/types/banking";
 import { useAuth } from "@/contexts/AuthContext";
 import { useGamification } from "@/contexts/GamificationContext";
 import { useStreak } from "@/contexts/StreakContext";
@@ -48,9 +51,12 @@ export default function ReportPage() {
   const [income, setIncome] = useState(0);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [savingsGoal, setSavingsGoal] = useState(100000);
+  const [linkedAccounts, setLinkedAccounts] = useState<LinkedBankAccount[]>([]);
+  const [creditOffer, setCreditOffer] = useState<MFBCreditAssessment | null>(null);
 
   useEffect(() => {
     setMounted(true);
+    setLinkedAccounts(BankingEngine.getLinkedAccounts());
   }, []);
 
   // Fetch budget info
@@ -138,7 +144,15 @@ export default function ReportPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, mounted]);
 
+  // Compute MFB credit assessment based on financial metrics
   const totalExpenses = expenses.reduce((acc, e) => acc + e.amount, 0);
+
+  useEffect(() => {
+    if (!mounted) return;
+    const letter = report ? getGrade(report.score).letter : "B";
+    const assess = BankingEngine.calculateCreditAssessment(income, totalExpenses, letter);
+    setCreditOffer(assess);
+  }, [mounted, income, totalExpenses, report]);
 
   // Generate new report card
   const handleGenerateReport = async () => {
@@ -454,6 +468,46 @@ ${report.recommendations.map(r => `* ${r}`).join("\n")}
                 </div>
               </div>
             </div>
+
+            {/* Microfinance Alternative Credit Offer Strip */}
+            {creditOffer && creditOffer.eligibleForLoan && (
+              <div className="surface-card p-6 rounded-3xl border border-primary/30 bg-gradient-to-r from-primary/10 via-card to-card flex flex-col md:flex-row md:items-center justify-between gap-6 shadow-sm">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="p-1.5 rounded-lg bg-primary/20 text-primary">
+                      <Building2 className="w-4 h-4" />
+                    </span>
+                    <span className="text-xs uppercase font-bold text-primary tracking-widest">
+                      Mono Open Banking • MFB Credit Line
+                    </span>
+                  </div>
+                  <h4 className="text-lg font-bold text-foreground">
+                    Pre-Approved for ₦{creditOffer.maxBorrowLimit.toLocaleString()} Micro-Facility
+                  </h4>
+                  <p className="text-xs text-muted-foreground max-w-xl leading-relaxed">
+                    {creditOffer.reasoning} Borrowing rate:{" "}
+                    <strong className="text-foreground">{creditOffer.interestRateMonthlyPct}% monthly</strong> over {creditOffer.recommendedTenorDays} days tenor.
+                  </p>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-center gap-3">
+                  <div className="text-right hidden sm:block">
+                    <span className="text-[10px] uppercase font-bold text-muted-foreground block">
+                      Underwritten via
+                    </span>
+                    <span className="text-xs font-semibold text-emerald-500">
+                      Mono MFB Protocol
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => alert(`Pre-qualification verified via Mono MFB Engine. Ready for disbursement upon account verification.`)}
+                    className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-primary text-primary-foreground font-semibold text-xs hover:opacity-90 transition-opacity flex items-center justify-center gap-2 shadow-sm"
+                  >
+                    View Offer Details <ArrowRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Strengths & Weaknesses checklists */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

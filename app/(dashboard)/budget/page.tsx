@@ -489,12 +489,40 @@ export default function BudgetPage() {
                 <p className="text-xs text-muted-foreground">Live balance telemetry & automated expense extraction</p>
               </div>
             </div>
-            <button
-              onClick={() => setIsBankModalOpen(true)}
-              className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
-            >
-              + Link Another MFB
-            </button>
+            <div className="flex items-center gap-3">
+              {bankTransactions.filter((t) => t.type === "DEBIT").length > 0 && isToday && (
+                <button
+                  onClick={() => {
+                    const debitTxns = bankTransactions.filter((t) => t.type === "DEBIT");
+                    const importedExpenses: Expense[] = debitTxns.map((t) => ({
+                      id: `exp_bank_${t.id}`,
+                      name: t.narration.replace("POS DEBIT - ", "").replace("DISCO ", ""),
+                      amount: t.amount,
+                      category: t.category,
+                      createdAt: Date.now(),
+                    }));
+                    // Filter out already imported
+                    const existingNames = new Set(expenses.map((e) => e.name));
+                    const newToAdd = importedExpenses.filter((e) => !existingNames.has(e.name));
+                    if (newToAdd.length > 0) {
+                      saveExpenses([...expenses, ...newToAdd]);
+                      alert(`Successfully imported ${newToAdd.length} bank transactions into today's ledger!`);
+                    } else {
+                      alert("All recent transactions are already in your ledger.");
+                    }
+                  }}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-xl bg-primary text-primary-foreground hover:opacity-90 transition-opacity flex items-center gap-1.5 shadow-sm"
+                >
+                  <ArrowDownLeft className="w-3.5 h-3.5" /> Import Bank Outflow
+                </button>
+              )}
+              <button
+                onClick={() => setIsBankModalOpen(true)}
+                className="text-xs font-semibold text-primary hover:underline flex items-center gap-1"
+              >
+                + Link Another MFB
+              </button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">

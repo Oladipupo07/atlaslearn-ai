@@ -29,7 +29,10 @@ import {
   ShieldAlert,
   Sparkles,
   ArrowUpRight,
+  Building2,
 } from "lucide-react";
+import { BankingEngine } from "@/lib/banking-service";
+import { LinkedBankAccount } from "@/types/banking";
 import { useGamification, getLevelFromXP } from "@/contexts/GamificationContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useStreak } from "@/contexts/StreakContext";
@@ -81,6 +84,7 @@ export default function DashboardPage() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [roadmap, setRoadmap] = useState<Roadmap | null>(null);
   const [latestReport, setLatestReport] = useState<ReportCard | null>(null);
+  const [linkedAccounts, setLinkedAccounts] = useState<LinkedBankAccount[]>([]);
 
   // Dashboard UI states
   const [mounted, setMounted] = useState(false);
@@ -92,6 +96,7 @@ export default function DashboardPage() {
     setMounted(true);
     const day = new Date().getDate();
     setDailyTip(DAILY_TIPS[day % DAILY_TIPS.length]);
+    setLinkedAccounts(BankingEngine.getLinkedAccounts());
   }, []);
 
   // Fetch all user statistics & assets from LocalStorage first, then Firestore if online
@@ -355,6 +360,50 @@ export default function DashboardPage() {
           </motionImport.div>
         )}
       </AnimatePresenceImport>
+
+      {/* Connected MFB Live Telemetry Strip */}
+      {linkedAccounts.length > 0 && (
+        <motionImport.div
+          variants={itemVariants}
+          className="surface-card p-4 rounded-2xl border border-primary/20 bg-gradient-to-r from-primary/10 via-card to-card flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+        >
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-primary/15 border border-primary/30 flex items-center justify-center text-primary shrink-0">
+              <Building2 className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-foreground">
+                  Linked Microfinance Liquidity
+                </span>
+                <span className="text-[10px] bg-emerald-500/10 text-emerald-500 font-semibold px-2 py-0.5 rounded-full border border-emerald-500/20">
+                  {linkedAccounts.length} {linkedAccounts.length === 1 ? "MFB Active" : "MFBs Active"}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {linkedAccounts.map((a) => a.institutionName).join(" • ")}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="text-left sm:text-right">
+              <span className="text-[10px] uppercase font-bold text-muted-foreground tracking-wider block">
+                Total Available Vault
+              </span>
+              <span className="text-lg font-black text-emerald-500 font-mono">
+                ₦{linkedAccounts.reduce((sum, a) => sum + (a.availableBalance || 0), 0).toLocaleString()}
+              </span>
+            </div>
+            <Link
+              href="/budget"
+              className="text-xs font-semibold px-3 py-1.5 rounded-xl border border-border bg-card hover:bg-muted transition-colors flex items-center gap-1.5"
+            >
+              Manage <ArrowUpRight className="w-3.5 h-3.5" />
+            </Link>
+          </div>
+        </motionImport.div>
+      )}
 
       {/* Primary Telemetry KPI Strip */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
