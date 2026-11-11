@@ -232,3 +232,4 @@ export function BankConnectModal({ isOpen, onClose, onAccountLinked }: BankConne
     </AnimatePresence>
   );
 }
+

@@ -52,3 +52,4 @@ export interface MFBCreditAssessment {
   healthGradeFactor: string; // e.g. "A+", "B"
   reasoning: string;
 }
+
